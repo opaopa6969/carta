@@ -3,13 +3,13 @@
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.carta</groupId>
+    <groupId>org.unlaxer</groupId>
     <artifactId>carta</artifactId>
-    <version>0.1.0</version>
+    <version>1.0.0</version>
     <packaging>jar</packaging>
 
     <name>Carta</name>
-    <description>Hierarchical state machine library inspired by Harel's Statechart formalism</description>
+    <description>State machine library unifying Harel Statechart expressiveness with tramli data-flow verification</description>
     <url>https://github.com/opaopa6969/carta</url>
 
     <licenses>

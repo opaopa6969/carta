@@ -1,4 +1,4 @@
-package com.carta;
+package org.unlaxer;
 
 public class CartaException extends RuntimeException {
     private final String code;
