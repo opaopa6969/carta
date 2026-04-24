@@ -258,4 +258,125 @@ class TramliCompatTest {
         assertTrue(md.contains("OrderId"));
         assertTrue(md.contains("TrackingNumber"));
     }
+
+    // ─── New tests ───────────────────────────────────────────
+
+    @Test
+    void resumeAlreadyCompletedReturnsAlreadyCompleted() {
+        var engine = Carta.start(orderFlow());
+        engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX", 100)));
+        assertTrue(engine.isCompleted());
+        var result = engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX2", 200)));
+        assertEquals(CartaEngine.ResumeResult.ALREADY_COMPLETED, result);
+    }
+
+    @Test
+    void resumeNoApplicableTransitionWhenNoneRegistered() {
+        // A machine with no external transitions in initial state
+        var noExternalFlow = Carta.define("NoExternal")
+            .root("NoExternal")
+                .initial("Waiting")
+                .terminal("Done")
+            .transition().from("Waiting").on(Event.of("go")).to("Done")
+            .build();
+        var engine = Carta.start(noExternalFlow);
+        var result = engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("X", 1)));
+        assertEquals(CartaEngine.ResumeResult.NO_APPLICABLE_TRANSITION, result);
+    }
+
+    @Test
+    void dataFlowGraphDeadData() {
+        // A machine where a processor produces a type that no one consumes
+        record Orphan(String v) {}
+        StateProcessor producer = new StateProcessor() {
+            @Override public Set<Class<?>> produces() { return Set.of(Orphan.class); }
+            @Override public void process(StateContext ctx) {
+                ctx.put(Orphan.class, new Orphan("x"));
+            }
+        };
+        var flow = Carta.define("DeadDataFlow")
+            .root("DeadDataFlow")
+                .initial("A")
+                .terminal("B")
+            .auto("A", "B", producer)
+            .build();
+        var graph = flow.dataFlowGraph();
+        assertTrue(graph.deadData().contains(Orphan.class));
+    }
+
+    @Test
+    void dataFlowGraphAllTypes() {
+        var graph = orderFlow().dataFlowGraph();
+        var allTypes = graph.allTypes();
+        assertTrue(allTypes.contains(OrderId.class));
+        assertTrue(allTypes.contains(PaymentConfirmation.class));
+        assertTrue(allTypes.contains(TrackingNumber.class));
+    }
+
+    @Test
+    void dataFlowGraphAvailableAt() {
+        var graph = orderFlow().dataFlowGraph();
+        // After PaymentPending, OrderId was produced by auto transition
+        var atPaymentPending = graph.availableAt("PaymentPending");
+        assertTrue(atPaymentPending.contains(OrderId.class));
+    }
+
+    @Test
+    void dataFlowMarkdownContainsProducersAndConsumers() {
+        var graph = orderFlow().dataFlowGraph();
+        String md = graph.toMarkdown();
+        assertTrue(md.contains("## Producers"));
+        assertTrue(md.contains("## Consumers"));
+        assertTrue(md.contains("## Availability"));
+    }
+
+    @Test
+    void stateMachineNameAndTransitions() {
+        var machine = orderFlow();
+        assertEquals("OrderFlow", machine.name());
+        assertFalse(machine.transitions().isEmpty());
+    }
+
+    @Test
+    void branchBadLabelThrows() {
+        BranchProcessor badDecider = new BranchProcessor() {
+            @Override public Set<Class<?>> requires() { return Set.of(ShipmentReady.class); }
+            @Override public String decide(StateContext ctx) { return "unknown_label"; }
+        };
+        var flow = Carta.define("BadBranch")
+            .root("BadBranch")
+                .initial("Pending")
+                .state("Routing").end()
+                .terminal("ExpressShipped")
+                .terminal("StandardShipped")
+            .auto("Pending", "Routing", new StateProcessor() {
+                @Override public Set<Class<?>> produces() { return Set.of(ShipmentReady.class); }
+                @Override public void process(StateContext ctx) {
+                    ctx.put(ShipmentReady.class, new ShipmentReady(false));
+                }
+            })
+            .branch("Routing", badDecider, Map.of(
+                "express", "ExpressShipped",
+                "standard", "StandardShipped"
+            ))
+            .build();
+        var ex = assertThrows(CartaException.class, () -> Carta.start(flow));
+        assertTrue(ex.getMessage().contains("unknown_label"));
+        assertEquals("BRANCH_ERROR", ex.code());
+    }
+
+    @Test
+    void maxAutoChainDepthConstant() {
+        assertEquals(10, CartaEngine.MAX_AUTO_CHAIN_DEPTH);
+    }
+
+    @Test
+    void transitionLogRecordToString() {
+        var engine = Carta.start(orderFlow());
+        var record = engine.log().get(0);
+        String str = record.toString();
+        assertTrue(str.contains("Created"));
+        assertTrue(str.contains("PaymentPending"));
+        assertTrue(str.contains("[auto]"));
+    }
 }

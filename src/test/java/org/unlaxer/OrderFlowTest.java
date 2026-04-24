@@ -1,6 +1,7 @@
 package org.unlaxer;
 
 import org.junit.jupiter.api.Test;
+import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class OrderFlowTest {
@@ -123,5 +124,244 @@ class OrderFlowTest {
         assertTrue(mermaid.contains("stateDiagram-v2"));
         assertTrue(mermaid.contains("Processing"));
         assertTrue(mermaid.contains("Shipped --> [*]"));
+    }
+
+    // ─── New tests: CartaException, StateContext, StateNode, StateMachine ───
+
+    @Test
+    void cartaExceptionHasCodeAndMessage() {
+        var ex = new CartaException("MY_CODE", "something went wrong");
+        assertEquals("MY_CODE", ex.code());
+        assertTrue(ex.getMessage().contains("MY_CODE"));
+        assertTrue(ex.getMessage().contains("something went wrong"));
+    }
+
+    @Test
+    void cartaExceptionDefaultCode() {
+        var ex = new CartaException("plain message");
+        assertEquals("CARTA_ERROR", ex.code());
+        assertEquals("plain message", ex.getMessage());
+    }
+
+    @Test
+    void stateContextStringAndTypeKeyedCoexist() {
+        var ctx = new StateContext();
+        ctx.put("label", "hello");
+        ctx.put(Integer.class, 42);
+
+        assertEquals("hello", ctx.get("label", String.class));
+        assertEquals(42, ctx.get(Integer.class));
+        assertTrue(ctx.has("label"));
+        assertTrue(ctx.has(Integer.class));
+        assertFalse(ctx.has("missing"));
+        assertFalse(ctx.has(Long.class));
+    }
+
+    @Test
+    void stateContextFindReturnsEmpty() {
+        var ctx = new StateContext();
+        assertTrue(ctx.find("nope", String.class).isEmpty());
+        assertTrue(ctx.find(Double.class).isEmpty());
+    }
+
+    @Test
+    void stateContextGetMissingKeyThrows() {
+        var ctx = new StateContext();
+        assertThrows(CartaException.class, () -> ctx.get("absent", String.class));
+        assertThrows(CartaException.class, () -> ctx.get(Long.class));
+    }
+
+    @Test
+    void stateContextSnapshot() {
+        var ctx = new StateContext();
+        ctx.put("k", "v");
+        ctx.put(Integer.class, 7);
+        var snap = ctx.snapshot();
+        assertEquals("v", snap.get("k"));
+        assertTrue(snap.containsKey("@Integer"));
+        assertEquals(7, snap.get("@Integer"));
+    }
+
+    @Test
+    void stateMachineFindStatePresent() {
+        var machine = orderMachine();
+        assertTrue(machine.findState("Created").isPresent());
+        assertTrue(machine.findState("Shipped").isPresent());
+    }
+
+    @Test
+    void stateMachineFindStateMissing() {
+        var machine = orderMachine();
+        assertTrue(machine.findState("NoSuchState").isEmpty());
+    }
+
+    @Test
+    void stateMachineStateThrowsForUnknown() {
+        var machine = orderMachine();
+        var ex = assertThrows(CartaException.class, () -> machine.state("Ghost"));
+        assertTrue(ex.getMessage().contains("Ghost"));
+        assertEquals("UNKNOWN_STATE", ex.code());
+    }
+
+    @Test
+    void stateNodeProperties() {
+        var machine = orderMachine();
+        var created = machine.state("Created");
+        assertFalse(created.isTerminal());
+        assertTrue(created.isInitial());
+        assertTrue(created.isLeaf());
+        assertFalse(created.isComposite());
+
+        var processing = machine.state("Processing");
+        assertTrue(processing.isComposite());
+        assertFalse(processing.isLeaf());
+        assertFalse(processing.isTerminal());
+    }
+
+    @Test
+    void stateNodePath() {
+        var machine = orderMachine();
+        var paymentPending = machine.state("PaymentPending");
+        var path = paymentPending.path();
+        // Path: Order → Processing → PaymentPending
+        assertEquals(List.of("Order", "Processing", "PaymentPending"), path);
+    }
+
+    @Test
+    void stateNodeFindDescendant() {
+        var machine = orderMachine();
+        var order = machine.root();
+        var found = order.findDescendant("PaymentPending");
+        assertTrue(found.isPresent());
+        assertEquals("PaymentPending", found.get().name());
+        assertTrue(order.findDescendant("NoWhere").isEmpty());
+    }
+
+    @Test
+    void sendOnCompletedMachineReturnsFalse() {
+        var engine = Carta.start(orderMachine());
+        engine.send(START);
+        engine.send(PAYMENT, "amount", 100);
+        engine.send(SHIP);
+        assertTrue(engine.isCompleted());
+        assertFalse(engine.send(START));
+    }
+
+    @Test
+    void sendUnknownEventReturnsFalse() {
+        var engine = Carta.start(orderMachine());
+        Event unknown = Event.of("Unknown");
+        assertFalse(engine.send(unknown));
+        assertEquals("Created", engine.currentState().name());
+    }
+
+    @Test
+    void mermaidDataFlowDiagram() {
+        // toDataFlowMermaid doesn't throw and contains flowchart header
+        var mermaid = orderMachine().toDataFlowMermaid();
+        assertTrue(mermaid.contains("flowchart LR"));
+    }
+
+    @Test
+    void validationRejectsUnknownTransitionEndpoints() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("BadEndpoints")
+                .root("BadEndpoints")
+                    .initial("A")
+                    .terminal("B")
+                .transition().from("A").on(Event.of("go")).to("NONEXISTENT")
+                .build()
+        );
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("unknown state"));
+    }
+
+    @Test
+    void validationRejectsTerminalWithOutgoingTransition() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("TerminalOutgoing")
+                .root("TerminalOutgoing")
+                    .initial("A")
+                    .terminal("B")
+                    .terminal("C")
+                .transition().from("B").on(Event.of("go")).to("C")
+                .build()
+        );
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("outgoing transition"));
+    }
+
+    @Test
+    void guardOutputVariants() {
+        GuardOutput accepted = GuardOutput.accepted();
+        assertTrue(accepted instanceof GuardOutput.Accepted a && a.data().isEmpty());
+
+        GuardOutput rejected = GuardOutput.rejected("bad input");
+        assertTrue(rejected instanceof GuardOutput.Rejected r && r.reason().equals("bad input"));
+
+        GuardOutput expired = GuardOutput.expired();
+        assertTrue(expired instanceof GuardOutput.Expired);
+
+        Map<Class<?>, Object> data = Map.of(String.class, "hello");
+        GuardOutput acceptedWithData = GuardOutput.accepted(data);
+        assertTrue(acceptedWithData instanceof GuardOutput.Accepted aw && aw.data().containsKey(String.class));
+    }
+
+    @Test
+    void eventEqualityAndHashCode() {
+        Event e1 = Event.of("Click");
+        Event e2 = Event.of("Click");
+        Event e3 = Event.of("Hover");
+        assertEquals(e1, e2);
+        assertNotEquals(e1, e3);
+        assertEquals(e1.hashCode(), e2.hashCode());
+        assertEquals("Click", e1.name());
+        assertTrue(e1.toString().contains("Click"));
+    }
+
+    @Test
+    void inMemoryFlowStoreOperations() {
+        var store = Carta.memoryStore();
+        assertEquals(0, store.size());
+
+        var instance = new FlowInstance("flow-1", "SomeState");
+        store.save(instance);
+        assertEquals(1, store.size());
+
+        var loaded = store.load("flow-1");
+        assertTrue(loaded.isPresent());
+        assertEquals("SomeState", loaded.get().currentState());
+
+        assertTrue(store.load("missing").isEmpty());
+
+        store.delete("flow-1");
+        assertEquals(0, store.size());
+        assertTrue(store.load("flow-1").isEmpty());
+    }
+
+    @Test
+    void inMemoryFlowStoreAllReturnsAllInstances() {
+        var store = Carta.memoryStore();
+        store.save(new FlowInstance("a", "X"));
+        store.save(new FlowInstance("b", "Y"));
+        assertEquals(2, store.all().size());
+    }
+
+    @Test
+    void flowInstanceToString() {
+        var fi = new FlowInstance("id-99", "MyState");
+        assertTrue(fi.toString().contains("id-99"));
+        assertTrue(fi.toString().contains("MyState"));
+    }
+
+    @Test
+    void toFlowInstancePreservesStateAndId() {
+        var engine = Carta.start(orderMachine());
+        engine.send(START);
+        var fi = engine.toFlowInstance("order-abc");
+        assertEquals("order-abc", fi.id());
+        assertEquals("PaymentPending", fi.currentState());
+        assertNotNull(fi.createdAt());
+        assertNotNull(fi.updatedAt());
     }
 }
