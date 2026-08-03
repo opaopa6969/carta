@@ -421,7 +421,7 @@ resume(PaymentConfirmation)
 `build()` 時に、Carta は全ての `requires()` 型が上流のいずれかの Processor によって produce されていることを検証する。されていなければビルド失敗:
 
 ```
-StateMachine 'Order' has 1 error(s):
+[INVALID_DEFINITION] Order has 1 error(s):
   - Data-flow: CustomerProfile is required but never produced
 ```
 
@@ -600,7 +600,16 @@ Carta は**状態、遷移、外部イベント**を持つあらゆるシステ�
 
 | 言語 | バージョン | 依存 |
 |------|----------|------|
-| Java | 21+ | ゼロ |
+| Java | 21+ | ゼロ（実行時） |
+
+## ビルド
+
+Carta は Maven プロジェクト（`org.unlaxer:carta:1.0.0`）。依存は JUnit 5 のみで、テスト用。
+
+```bash
+mvn test      # コンパイルしてテストスイートを実行
+mvn package   # jar を target/ にビルド
+```
 
 ## ライセンス
 

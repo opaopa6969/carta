@@ -421,7 +421,7 @@ Every [StateProcessor](#stateprocessor) declares what data it needs and provides
 At `build()` time, Carta verifies that every `requires()` type is produced by some processor upstream. If not, build fails:
 
 ```
-StateMachine 'Order' has 1 error(s):
+[INVALID_DEFINITION] Order has 1 error(s):
   - Data-flow: CustomerProfile is required but never produced
 ```
 
@@ -600,7 +600,16 @@ Carta works for any system with **states, transitions, and external events**:
 
 | Language | Version | Dependencies |
 |----------|---------|-------------|
-| Java | 21+ | Zero |
+| Java | 21+ | Zero (runtime) |
+
+## Build
+
+Carta is a Maven project (`org.unlaxer:carta:1.0.0`). JUnit 5 is the only dependency, used for tests.
+
+```bash
+mvn test      # compile and run the test suite
+mvn package   # build the jar into target/
+```
 
 ## License
 
