@@ -526,16 +526,18 @@ restored.resume(Map.of(PaymentConfirmation.class, confirmation));
 Carta's overhead is negligible for any I/O-bound application:
 
 ```
-Per transition:    ~300-500ns (String comparison + HashMap lookup)
-5-transition flow: ~2μs total
+Per transition:    ~150-300ns (pre-indexed transition lookup, 3.4x faster than pre-1.1)
+5-transition flow: ~0.75-1.5μs total
 
 For comparison:
   DB INSERT:          1-5ms
   HTTP round-trip:    50-500ms
   IdP OAuth exchange: 200-500ms
 
-SM overhead / total = 0.0004%
+SM overhead / total = 0.0001%
 ```
+
+Benchmark: `mvn -Dtest=BenchmarkTest test` (zero-dependency nanoTime harness, warmup 100k, 7 forks x 100k iters, JDK 21). Reproducible on the local machine; numbers exclude JVM startup and GC overhead.
 
 ---
 

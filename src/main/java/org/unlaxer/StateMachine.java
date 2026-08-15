@@ -19,18 +19,64 @@ public final class StateMachine {
     private final List<Transition> transitions;
     private final Map<String, StateNode> stateIndex;
 
+    // Pre-built indices for O(1) lookup by (state, type) and (state, event, type).
+    // Built once at construction; immutable afterwards. This is the key
+    // optimization that lets send()/autoChain() avoid stream() + toList()
+    // allocations on the hot path.
+    private final Map<String, List<Transition>> autoByState;
+    private final Map<String, List<Transition>> externalByState;
+    private final Map<String, List<Transition>> branchByState;
+    private final Map<String, Map<Event, List<Transition>>> eventByStateAndEvent;
+    private static final List<Transition> EMPTY = List.of();
+
     StateMachine(String name, StateNode root, List<Transition> transitions) {
         this.name = name;
         this.root = root;
         this.transitions = List.copyOf(transitions);
         this.stateIndex = new LinkedHashMap<>();
         indexStates(root);
+        this.autoByState = new LinkedHashMap<>();
+        this.externalByState = new LinkedHashMap<>();
+        this.branchByState = new LinkedHashMap<>();
+        this.eventByStateAndEvent = new LinkedHashMap<>();
+        indexTransitions();
         validate();
     }
 
     private void indexStates(StateNode node) {
         stateIndex.put(node.name(), node);
         for (StateNode child : node.children()) indexStates(child);
+    }
+
+    private void indexTransitions() {
+        for (Transition t : transitions) {
+            switch (t.type()) {
+                case EVENT -> eventByStateAndEvent
+                    .computeIfAbsent(t.from(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(t.event(), k -> new ArrayList<>())
+                    .add(t);
+                case AUTO -> autoByState
+                    .computeIfAbsent(t.from(), k -> new ArrayList<>())
+                    .add(t);
+                case EXTERNAL -> externalByState
+                    .computeIfAbsent(t.from(), k -> new ArrayList<>())
+                    .add(t);
+                case BRANCH -> branchByState
+                    .computeIfAbsent(t.from(), k -> new ArrayList<>())
+                    .add(t);
+            }
+        }
+        // Freeze all index lists into immutable List.of variants
+        for (var e : autoByState.entrySet()) e.setValue(List.copyOf(e.getValue()));
+        for (var e : externalByState.entrySet()) e.setValue(List.copyOf(e.getValue()));
+        for (var e : branchByState.entrySet()) e.setValue(List.copyOf(e.getValue()));
+        for (var e : eventByStateAndEvent.entrySet()) {
+            Map<Event, List<Transition>> frozen = new LinkedHashMap<>();
+            for (var ee : e.getValue().entrySet()) {
+                frozen.put(ee.getKey(), List.copyOf(ee.getValue()));
+            }
+            e.setValue(Map.copyOf(frozen));
+        }
     }
 
     public String name() { return name; }
@@ -49,31 +95,25 @@ public final class StateMachine {
 
     /** Event-driven transitions from a state (Harel mode). */
     public List<Transition> transitionsFrom(String state, Event event) {
-        return transitions.stream()
-            .filter(t -> t.type() == Transition.Type.EVENT)
-            .filter(t -> t.from().equals(state) && t.event().equals(event))
-            .toList();
+        Map<Event, List<Transition>> byEvent = eventByStateAndEvent.get(state);
+        if (byEvent == null) return EMPTY;
+        List<Transition> list = byEvent.get(event);
+        return list == null ? EMPTY : list;
     }
 
     /** Auto transitions from a state. */
     public List<Transition> autoTransitionsFrom(String state) {
-        return transitions.stream()
-            .filter(t -> t.type() == Transition.Type.AUTO && t.from().equals(state))
-            .toList();
+        return autoByState.getOrDefault(state, EMPTY);
     }
 
     /** External transitions from a state. */
     public List<Transition> externalTransitionsFrom(String state) {
-        return transitions.stream()
-            .filter(t -> t.type() == Transition.Type.EXTERNAL && t.from().equals(state))
-            .toList();
+        return externalByState.getOrDefault(state, EMPTY);
     }
 
     /** Branch transitions from a state. */
     public List<Transition> branchTransitionsFrom(String state) {
-        return transitions.stream()
-            .filter(t -> t.type() == Transition.Type.BRANCH && t.from().equals(state))
-            .toList();
+        return branchByState.getOrDefault(state, EMPTY);
     }
 
     /** Resolve to leaf: if composite, descend to initial children. */
