@@ -1,0 +1,102 @@
+{
+  "repo": "carta",
+  "surveyed_at": "2026-08-21T23:35:19Z",
+  "kind": "library",
+  "summary": "Harel Statechart の階層状態・entry/exit・イベントバブリングと、tramli のデータフロー検証（requires/produces 契約・auto-chain・ビルド時検証）を統合した Java ライブラリ。依存ゼロ・Maven Central 公開。",
+  "decision": "skip",
+  "decision_reason": "Carta は純粋な Java DSL ライブラリで、状態機械の定義（プロセッサ・ガード・Class<?> 型の requires/produces）が Java コードそのものであり、MCP 経由で意味のある状態機械を定義・実行できない。検証・Mermaid 生成・データフロー分析もすべて StateMachine オブジェクト（Java コードで構築）が必要で、単独で RPC する価値がない。依存ゼロ・起動μs単位・Maven Central 公開済みで、Java プロジェクトは依存追加するだけで済む。将来 Carta が宣言的（JSON/YAML）定義をサポートすれば library-serve を再検討できるが、現時点では該当しない。",
+  "existing": {
+    "http_api": false,
+    "cli": false,
+    "mcp": false,
+    "healthz": false,
+    "volta_manifest": false,
+    "hosted_url": null
+  },
+  "proposed_namespace": null,
+  "capabilities": [
+    {
+      "verb": "状態機械定義を検証する",
+      "kind": "tool",
+      "name": "validate",
+      "io": "StateMachine 定義（Java DSL）→ 検証結果（7項目の構造チェック）",
+      "side_effect": "none",
+      "long_running": false,
+      "maps_to": "StateMachine.validate() (StateMachine.java:233) — ただし Java DSL で StateMachine 構築が必要。プロセッサ・ガードが Java ラムダ/インターフェースであり JSON で表現不可"
+    },
+    {
+      "verb": "Mermaid 状態図を生成する",
+      "kind": "tool",
+      "name": "to_mermaid",
+      "io": "StateMachine → Mermaid stateDiagram-v2 text",
+      "side_effect": "none",
+      "long_running": false,
+      "maps_to": "StateMachine.toMermaid() (StateMachine.java:148) — ただし StateMachine オブジェクト構築に Java DSL が必要"
+    },
+    {
+      "verb": "データフロー図を生成する",
+      "kind": "tool",
+      "name": "to_data_flow_mermaid",
+      "io": "StateMachine → Mermaid flowchart text（requires/produces 可視化）",
+      "side_effect": "none",
+      "long_running": false,
+      "maps_to": "StateMachine.toDataFlowMermaid() (StateMachine.java:175) — 同上"
+    },
+    {
+      "verb": "データフローを分析する",
+      "kind": "tool",
+      "name": "analyze_data_flow",
+      "io": "StateMachine → DataFlowGraph（到達可能型・生産者・消費者・死データ・Markdown レポート）",
+      "side_effect": "none",
+      "long_running": false,
+      "maps_to": "StateMachine.dataFlowGraph() (StateMachine.java:141) → DataFlowGraph — 同上"
+    },
+    {
+      "verb": "能力の仕様",
+      "kind": "resource",
+      "name": "spec",
+      "uri": "carta://spec"
+    },
+    {
+      "verb": "使い方",
+      "kind": "resource",
+      "name": "guide",
+      "uri": "carta://guide"
+    }
+  ],
+  "composition_examples": [
+    "skip 判定のため組み合わせ例は非対象。仮に宣言的定義をサポートした場合の想定: carta__validate → carta__to_mermaid（設計したフローを検証して図を生成しドキュメントに埋め込む）",
+    "同上の想定: tramli-appspec が生成したフロー定義 JSON → carta__validate で検証 → carta__to_data_flow_mermaid でデータ依存を可視化",
+    "同上の想定: nanori__parse（名乗り解析）の結果を carta__send_event で状態機械に取り込み、ワークフローを進行させる"
+  ],
+  "dependencies": [
+    {
+      "repo": "tramli",
+      "direction": "provides_to",
+      "capability": "Carta は tramli の上位互換（Harel 階層 + tramli データフロー検証）。tramli ユーザが Carta に移行する場合、データフロー検証はそのまま動く",
+      "exists_now": true,
+      "note": "tramli も library で MCP なし。相互の MCP 協調は不要"
+    },
+    {
+      "repo": "tramli-appspec",
+      "direction": "depends_on",
+      "capability": "tramli-appspec は tramli ファミリ向けの spec-driven フロー設計。Carta は superset だが appspec 連携は現状 tramli 向け",
+      "exists_now": true,
+      "note": "将来的に Carta 向け拡張の可能性があるが Phase 1 では追わない"
+    }
+  ],
+  "library_serve": {
+    "needed": false,
+    "new_work": [],
+    "runtime": "java",
+    "estimated_effort": "L"
+  },
+  "risks": [
+    "Carta のプロセッサ・ガードは Java コード（ラムダ/インターフェース）であり、MCP 経由で動的定義するには任意のコード実行が必要になる（安全でない）",
+    "もし宣言的定義を追加する場合、プロセッサのビジネスロジックをどう表現するかが根本的な設計課題",
+    "JVM 常駐プロセスの運用コスト（ポート・メモリ・起動時間）が、μs 単位のライブラリ呼び出しに対して不釣り合い"
+  ],
+  "open_questions": [
+    "Carta に JSON/YAML による宣言的状態機械定義（プロセッサを除く構造検証・図生成のみ、または式言語によるガード/アクション）を追加する予定があるか？ これがあれば library-serve を再検討できる"
+  ]
+}
