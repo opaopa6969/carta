@@ -15,6 +15,7 @@ tramli の上位互換: tramli の全機能に加え、Harel の Statechart 形�
 ## 目次
 
 - [なぜ Carta が必要か](#なぜ-carta-が必要か)
+- [Hello World](#hello-world) — 2状態の最小構成
 - [クイックスタート — Harel モード](#クイックスタート--harel-モード) — 階層、イベント、entry/exit
 - [クイックスタート — tramli モード](#クイックスタート--tramli-モード) — auto/external/branch, requires/produces
 - [コアコンセプト](#コアコンセプト) — 構成要素
@@ -59,6 +60,26 @@ Carta:   両方       ★★★ 検証精度 (flat) + ★★★ 表現力 (階�
 ```
 
 完全なデータフロー検証が必要なら flat 状態を使う。構造的表現力が必要なら階層を使う。同じ定義内で自由に混合できる。
+
+---
+
+## Hello World
+
+Carta の最小フローは、2つの状態と1つのイベント遷移で構成できる:
+
+```java
+Event finish = Event.of("Finish");
+
+var hello = Carta.define("Hello")
+    .root("Hello")
+    .initial("Idle")
+    .terminal("Done")
+    .transition().from("Idle").on(finish).to("Done")
+    .build();
+
+var engine = Carta.start(hello);
+engine.send(finish);  // Idle → Done
+```
 
 ---
 
@@ -421,9 +442,21 @@ resume(PaymentConfirmation)
 `build()` 時に、Carta は全ての `requires()` 型が上流のいずれかの Processor によって produce されていることを検証する。されていなければビルド失敗:
 
 ```
-StateMachine 'Order' has 1 error(s):
+[INVALID_DEFINITION] Order has 1 error(s):
   - Data-flow: CustomerProfile is required but never produced
 ```
+
+実行可能な回帰例は
+[`TramliCompatTest`](src/test/java/org/unlaxer/TramliCompatTest.java) にある:
+
+| 失敗または診断 | 実行可能な例 |
+|---|---|
+| 必要な型を生成する Processor がない | [`dataFlowVerificationRejectsMissingProducer`](src/test/java/org/unlaxer/TramliCompatTest.java#L164-L182) |
+| Auto 遷移の cycle により chain が停止しない | [`autoDAGCycleDetected`](src/test/java/org/unlaxer/TramliCompatTest.java#L185-L202) |
+| 生成された型が消費されない（dead data） | [`dataFlowGraphDeadData`](src/test/java/org/unlaxer/TramliCompatTest.java#L288-L305) |
+
+分岐ごとの availability は、現時点では厳密なビルド時保証ではない。その意味論は
+[#5](https://github.com/opaopa6969/carta/issues/5) で追跡している。
 
 ---
 
@@ -602,7 +635,16 @@ Carta は**状態、遷移、外部イベント**を持つあらゆるシステ�
 
 | 言語 | バージョン | 依存 |
 |------|----------|------|
-| Java | 21+ | ゼロ |
+| Java | 21+ | ゼロ（実行時） |
+
+## ビルド
+
+Carta は Maven プロジェクト（`org.unlaxer:carta:1.0.0`）。依存は JUnit 5 のみで、テスト用。
+
+```bash
+mvn test      # コンパイルしてテストスイートを実行
+mvn package   # jar を target/ にビルド
+```
 
 ## ライセンス
 

@@ -15,6 +15,7 @@ tramli's superset: everything tramli does, plus **hierarchical states, entry/exi
 ## Table of Contents
 
 - [Why Carta exists](#why-carta-exists)
+- [Hello World](#hello-world) — a two-state machine
 - [Quick Start — Harel Mode](#quick-start--harel-mode) — hierarchy, events, entry/exit
 - [Quick Start — tramli Mode](#quick-start--tramli-mode) — auto/external/branch, requires/produces
 - [Core Concepts](#core-concepts) — the building blocks
@@ -59,6 +60,26 @@ Carta:   both      ★★★ verification (flat) + ★★★ expressiveness (hie
 ```
 
 Use flat states when you need full data-flow verification. Use hierarchy when you need structural expressiveness. Mix both freely in the same machine.
+
+---
+
+## Hello World
+
+The smallest Carta flow has two states and one event transition:
+
+```java
+Event finish = Event.of("Finish");
+
+var hello = Carta.define("Hello")
+    .root("Hello")
+    .initial("Idle")
+    .terminal("Done")
+    .transition().from("Idle").on(finish).to("Done")
+    .build();
+
+var engine = Carta.start(hello);
+engine.send(finish);  // Idle → Done
+```
 
 ---
 
@@ -421,9 +442,21 @@ Every [StateProcessor](#stateprocessor) declares what data it needs and provides
 At `build()` time, Carta verifies that every `requires()` type is produced by some processor upstream. If not, build fails:
 
 ```
-StateMachine 'Order' has 1 error(s):
+[INVALID_DEFINITION] Order has 1 error(s):
   - Data-flow: CustomerProfile is required but never produced
 ```
+
+Executable regression examples are kept in
+[`TramliCompatTest`](src/test/java/org/unlaxer/TramliCompatTest.java):
+
+| Failure or diagnostic | Executable example |
+|---|---|
+| A required type has no producer | [`dataFlowVerificationRejectsMissingProducer`](src/test/java/org/unlaxer/TramliCompatTest.java#L164-L182) |
+| An auto-transition cycle would make the chain non-terminating | [`autoDAGCycleDetected`](src/test/java/org/unlaxer/TramliCompatTest.java#L185-L202) |
+| A produced type is never consumed (dead data) | [`dataFlowGraphDeadData`](src/test/java/org/unlaxer/TramliCompatTest.java#L288-L305) |
+
+Branch-specific availability is not yet a strict build-time guarantee; its semantics
+are tracked in [#5](https://github.com/opaopa6969/carta/issues/5).
 
 ---
 
@@ -602,7 +635,16 @@ Carta works for any system with **states, transitions, and external events**:
 
 | Language | Version | Dependencies |
 |----------|---------|-------------|
-| Java | 21+ | Zero |
+| Java | 21+ | Zero (runtime) |
+
+## Build
+
+Carta is a Maven project (`org.unlaxer:carta:1.0.0`). JUnit 5 is the only dependency, used for tests.
+
+```bash
+mvn test      # compile and run the test suite
+mvn package   # build the jar into target/
+```
 
 ## License
 
