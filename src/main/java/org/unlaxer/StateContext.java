@@ -13,6 +13,11 @@ import java.util.*;
  *
  * Both modes coexist in the same context. Type-keyed access enables
  * build-time data-flow verification via requires/produces contracts.
+ *
+ * <p>This class is mutable and not thread-safe. A context is intended to be
+ * accessed by one thread at a time. If it is shared between threads, callers
+ * must serialize every read, write, and iteration (including access through a
+ * {@link CartaEngine}) with the same external lock.</p>
  */
 public final class StateContext {
     private final Map<String, Object> attrs = new LinkedHashMap<>();
