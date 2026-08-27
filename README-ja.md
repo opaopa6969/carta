@@ -439,7 +439,7 @@ resume(PaymentConfirmation)
 @Override public Set<Class<?>> produces() { return Set.of(TrackingNumber.class); }
 ```
 
-`build()` 時に、Carta は全ての `requires()` 型が上流のいずれかの Processor によって produce されていることを検証する。されていなければビルド失敗:
+`build()` 時に、Carta は全ての `requires()` 型が定義内の**いずれか**の Processor によって produce されているかを検証する（定義全体の存在確認）。遷移経路の到達可能性は検証しない。したがって、現在の経路では到達しえない分岐でのみ produce される型でも `build()` は通り、実行時に `CartaException` となり得る。されていなければビルド失敗:
 
 ```
 [INVALID_DEFINITION] Order has 1 error(s):
@@ -455,8 +455,7 @@ resume(PaymentConfirmation)
 | Auto 遷移の cycle により chain が停止しない | [`autoDAGCycleDetected`](src/test/java/org/unlaxer/TramliCompatTest.java#L185-L202) |
 | 生成された型が消費されない（dead data） | [`dataFlowGraphDeadData`](src/test/java/org/unlaxer/TramliCompatTest.java#L288-L305) |
 
-分岐ごとの availability は、現時点では厳密なビルド時保証ではない。その意味論は
-[#5](https://github.com/opaopa6969/carta/issues/5) で追跡している。
+経路ベースの availability は [`DataFlowGraph.availableAt(state)`](#データフローグラフ) で**診断**として提供する（到達可能な分岐の楽観的 union）が、`build()` の検証には用いない。厳密な経路検証の導入は将来の改善として [#5](https://github.com/opaopa6969/carta/issues/5) で追跡する。
 
 ---
 
