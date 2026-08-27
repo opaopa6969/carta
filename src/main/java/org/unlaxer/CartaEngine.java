@@ -17,6 +17,14 @@ import java.util.*;
  *
  * Auto-chain depth is capped at {@value #MAX_AUTO_CHAIN_DEPTH} to
  * prevent infinite loops (build-time DAG check catches most cases).
+ *
+ * <h2>Thread safety</h2>
+ * This class is mutable and not thread-safe. Each engine instance is intended
+ * to be used by one thread at a time. In particular, callers must not invoke
+ * {@link #send(Event)} and {@link #resume(Map)} concurrently, or access the
+ * returned {@link #context()} while an engine operation is in progress.
+ * Applications that share an instance between threads must serialize all
+ * access to both the engine and its context with the same external lock.
  */
 public final class CartaEngine {
 
