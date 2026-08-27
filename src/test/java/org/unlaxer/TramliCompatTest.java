@@ -1,7 +1,11 @@
 package org.unlaxer;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import java.util.*;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,6 +22,7 @@ class TramliCompatTest {
     record PaymentConfirmation(String txId, int amount) {}
     record TrackingNumber(String value) {}
     record ShipmentReady(boolean express) {}
+    record MatrixPayload(String value) {}
 
     // ─── Processors ────────────────────────────────────────
 
@@ -366,8 +371,140 @@ class TramliCompatTest {
     }
 
     @Test
+    void compositeWithoutInitialChildFailsAtBuildTime() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("MissingCompositeInitial")
+                .root("MissingCompositeInitial")
+                    .terminal("Done")
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains(
+            "Composite state MissingCompositeInitial has no initial child"));
+    }
+
+    @Test
+    void branchTargetMustExistAtBuildTime() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("MissingBranchTarget")
+                .root("MissingBranchTarget")
+                    .initial("Routing")
+                    .terminal("Known")
+                .branch("Routing", ctx -> "missing", Map.of("missing", "Unknown"))
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains(
+            "Branch label 'missing' maps to unknown state: Unknown"));
+    }
+
+    @Test
     void maxAutoChainDepthConstant() {
         assertEquals(10, CartaEngine.MAX_AUTO_CHAIN_DEPTH);
+    }
+
+    @Test
+    void autoChainStopsWithoutExceptionAtMaximumDepth() {
+        StateProcessor noop = ctx -> {};
+        var builder = Carta.define("DepthBound")
+            .root("DepthBound")
+                .initial("S0");
+        for (int i = 1; i <= CartaEngine.MAX_AUTO_CHAIN_DEPTH + 1; i++) {
+            builder.state("S" + i).end();
+        }
+        for (int i = 0; i <= CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+            builder.auto("S" + i, "S" + (i + 1), noop);
+        }
+
+        var machine = builder.build();
+        var engine = assertDoesNotThrow(() -> Carta.start(machine));
+
+        assertEquals("S" + CartaEngine.MAX_AUTO_CHAIN_DEPTH,
+            engine.currentState().name());
+        assertEquals(CartaEngine.MAX_AUTO_CHAIN_DEPTH, engine.log().size());
+        assertFalse(machine.autoTransitionsFrom(engine.currentState().name()).isEmpty(),
+            "an eligible eleventh transition proves the chain stopped at the depth bound");
+    }
+
+    @Test
+    void internalTransitionDoesNotRefireCompositeEntryOrExit() {
+        int[] parentEntries = {0};
+        int[] parentExits = {0};
+        Event enter = Event.of("enter");
+        Event internal = Event.of("internal");
+        var flow = Carta.define("InternalLca")
+            .root("InternalLca")
+                .initial("Outside")
+                .state("Group")
+                    .onEntry(ctx -> parentEntries[0]++)
+                    .onExit(ctx -> parentExits[0]++)
+                    .initial("A")
+                    .state("B").end()
+                .end()
+            .transition().from("Outside").on(enter).to("A")
+            .transition().from("A").on(internal).to("B")
+            .build();
+        var engine = Carta.start(flow);
+
+        assertTrue(engine.send(enter));
+        assertEquals(1, parentEntries[0]);
+        assertEquals(0, parentExits[0]);
+
+        assertTrue(engine.send(internal));
+        assertEquals("B", engine.currentState().name());
+        assertEquals(1, parentEntries[0],
+            "the LCA composite must not be entered again");
+        assertEquals(0, parentExits[0],
+            "the LCA composite must not be exited");
+    }
+
+    static Stream<Arguments> transitionAutoChainMatrix() {
+        return Arrays.stream(Transition.Type.values())
+            .flatMap(type -> Stream.of(false, true)
+                .map(followOnAuto -> Arguments.of(type, followOnAuto)));
+    }
+
+    @ParameterizedTest(name = "{0}, follow-on auto-chain={1}")
+    @MethodSource("transitionAutoChainMatrix")
+    void allTransitionTypesWithAndWithoutFollowOnAutoChain(
+            Transition.Type type, boolean followOnAuto) {
+        Event event = Event.of("matrix-event");
+        var builder = Carta.define("Matrix" + type + followOnAuto)
+            .root("Matrix")
+                .initial("Start")
+                .state("Triggered").end()
+                .terminal("Done");
+
+        switch (type) {
+            case EVENT -> builder.transition().from("Start").on(event).to("Triggered");
+            case AUTO -> builder.auto("Start", "Triggered", ctx -> {});
+            case EXTERNAL -> builder.external("Start", "Triggered", new TransitionGuard() {
+                @Override public String name() { return "matrix-guard"; }
+                @Override public Set<Class<?>> requires() { return Set.of(MatrixPayload.class); }
+                @Override public GuardOutput evaluate(StateContext ctx) {
+                    return GuardOutput.accepted();
+                }
+            });
+            case BRANCH -> builder.branch(
+                "Start", ctx -> "selected", Map.of("selected", "Triggered"));
+        }
+        if (followOnAuto) {
+            builder.auto("Triggered", "Done", ctx -> {});
+        }
+
+        var engine = Carta.start(builder.build());
+        switch (type) {
+            case EVENT -> assertTrue(engine.send(event));
+            case EXTERNAL -> assertEquals(CartaEngine.ResumeResult.TRANSITIONED,
+                engine.resume(Map.of(MatrixPayload.class, new MatrixPayload("data"))));
+            case AUTO, BRANCH -> { /* executed during engine construction */ }
+        }
+
+        assertEquals(followOnAuto ? "Done" : "Triggered",
+            engine.currentState().name());
+        assertEquals(followOnAuto ? 2 : 1, engine.log().size());
     }
 
     @Test
