@@ -516,4 +516,69 @@ class TramliCompatTest {
         assertTrue(str.contains("PaymentPending"));
         assertTrue(str.contains("[auto]"));
     }
+
+    // ─── #5 requires/produces whole-definition semantics ──────
+
+    /**
+     * #5: build() verifies whole-definition producer existence, NOT path
+     * reachability. A type produced only on one branch that the current path
+     * never takes still passes build() — the guard's requires() is satisfied
+     * because a producer exists somewhere in the definition.
+     */
+    @Test
+    void dataFlowValidationIsWholeDefinitionNotPathReachability() {
+        record OnlyOnBranch(String v) {}
+        record NeededByGuard(String v) {}
+
+        // branchA produces OnlyOnBranch; branchB does NOT, but needs it via guard.
+        // Whole-definition check: OnlyOnBranch is produced (on branchA) → build passes.
+        // Path-reachability check would reject: branchB can't see branchA's output.
+        StateProcessor branchAProducer = new StateProcessor() {
+            @Override public Set<Class<?>> produces() { return Set.of(OnlyOnBranch.class); }
+            @Override public void process(StateContext ctx) {
+                ctx.put(OnlyOnBranch.class, new OnlyOnBranch("a"));
+            }
+        };
+        TransitionGuard guardNeedingOnlyOnBranch = new TransitionGuard() {
+            @Override public String name() { return "needsOnlyOnBranch"; }
+            @Override public Set<Class<?>> requires() { return Set.of(OnlyOnBranch.class); }
+            @Override public GuardOutput evaluate(StateContext ctx) {
+                return GuardOutput.accepted();
+            }
+        };
+
+        var machine = assertDoesNotThrow(() ->
+            Carta.define("PathDivergence")
+                .root("PathDivergence")
+                    .initial("Start")
+                    .state("BranchA").end()
+                    .state("BranchB").end()
+                    .terminal("End")
+                .auto("Start", "BranchA", branchAProducer)
+                .external("BranchB", "End", guardNeedingOnlyOnBranch)
+                .build()
+        );
+        // build() passed: OnlyOnBranch has a producer (on BranchA), satisfying
+        // the whole-definition check even though BranchB can never reach BranchA.
+        // This pins the current semantics so a future path-aware change must
+        // update this test deliberately.
+        assertNotNull(machine);
+    }
+
+    /**
+     * #5: the README and spec now state that build() does a whole-definition
+     * existence check, not path-based verification. This test pins the wording
+     * so a future README drift is caught.
+     */
+    @Test
+    void readmeDocumentsWholeDefinitionNotPathSemantics() throws Exception {
+        var readme = java.nio.file.Files.readString(
+            java.nio.file.Path.of("README.md"));
+        // The corrected wording must NOT claim "upstream" path verification.
+        assertFalse(readme.contains("produced by some processor upstream"),
+            "README must not claim path-based 'upstream' verification");
+        // It must state the whole-definition existence check.
+        assertTrue(readme.contains("whole-definition existence check"),
+            "README must document the whole-definition existence check");
+    }
 }

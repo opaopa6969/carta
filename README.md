@@ -439,7 +439,7 @@ Every [StateProcessor](#stateprocessor) declares what data it needs and provides
 @Override public Set<Class<?>> produces() { return Set.of(TrackingNumber.class); }
 ```
 
-At `build()` time, Carta verifies that every `requires()` type is produced by some processor upstream. If not, build fails:
+At `build()` time, Carta verifies that every `requires()` type is produced by **some** processor anywhere in the definition (a whole-definition existence check). It does **not** verify reachability along transition paths, so a type produced only on a branch that the current path never takes can still pass `build()` and surface as a runtime `CartaException`. If not, build fails:
 
 ```
 [INVALID_DEFINITION] Order has 1 error(s):
@@ -455,8 +455,7 @@ Executable regression examples are kept in
 | An auto-transition cycle would make the chain non-terminating | [`autoDAGCycleDetected`](src/test/java/org/unlaxer/TramliCompatTest.java#L185-L202) |
 | A produced type is never consumed (dead data) | [`dataFlowGraphDeadData`](src/test/java/org/unlaxer/TramliCompatTest.java#L288-L305) |
 
-Branch-specific availability is not yet a strict build-time guarantee; its semantics
-are tracked in [#5](https://github.com/opaopa6969/carta/issues/5).
+Path-aware availability is available as a **diagnostic** via [`DataFlowGraph.availableAt(state)`](#data-flow-graph) (an optimistic union over reachable branches), but it is not enforced by `build()`. Strict path-aware verification is tracked as a future improvement in [#5](https://github.com/opaopa6969/carta/issues/5).
 
 ---
 
