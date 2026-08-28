@@ -154,8 +154,10 @@ public final class CartaEngine {
 
             } else if (output instanceof GuardOutput.Rejected rej) {
                 guardFailureCounts.merge(guard.name(), 1, Integer::sum);
+            } else if (output instanceof GuardOutput.Expired) {
+                // TTL exceeded — propagate to caller without counting as rejection.
+                return ResumeResult.EXPIRED;
             }
-            // Expired: handled by caller
         }
         return ResumeResult.REJECTED;
     }
@@ -165,7 +167,8 @@ public final class CartaEngine {
         TRANSITIONED,
         ALREADY_COMPLETED,
         NO_APPLICABLE_TRANSITION,
-        REJECTED
+        REJECTED,
+        EXPIRED
     }
 
     // ─── Auto-chain ────────────────────────────────────────

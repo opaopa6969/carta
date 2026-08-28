@@ -213,4 +213,77 @@ class UserLifecycleTest {
         assertTrue(mermaid.contains("suspendGuard"));
         assertTrue(mermaid.contains("banGuard"));
     }
+
+    // ─── #6 GuardOutput.Expired propagation ──────────────────
+
+    /**
+     * #6: A guard returning GuardOutput.Expired must surface as
+     * ResumeResult.EXPIRED (not be collapsed into REJECTED), so callers can
+     * distinguish TTL exhaustion from ordinary rejection. Expired does not
+     * increment guard failure counts.
+     */
+    @Test
+    void expiredGuardReturnsExpiredResult() {
+        TransitionGuard expiredGuard = new TransitionGuard() {
+            @Override public String name() { return "expiredGuard"; }
+            @Override public GuardOutput evaluate(StateContext ctx) {
+                return GuardOutput.expired();
+            }
+        };
+
+        var machine = Carta.define("TtlFlow")
+            .root("TtlFlow")
+                .initial("Waiting")
+                .terminal("Done")
+            .external("Waiting", "Done", expiredGuard)
+            .build();
+
+        var engine = Carta.start(machine);
+        var result = engine.resume(Map.of());
+        assertEquals(CartaEngine.ResumeResult.EXPIRED, result,
+            "Expired guard must propagate as EXPIRED, not REJECTED");
+        assertEquals("Waiting", engine.currentState().name(),
+            "Expired must not transition");
+    }
+
+    /**
+     * #6: When multiple guards exist, an Expired on one short-circuits and
+     * returns EXPIRED immediately (TTL exhaustion is terminal for this
+     * resume call), rather than falling through to other guards.
+     */
+    @Test
+    void expiredShortCircuitsBeforeOtherGuards() {
+        // Two guards on the same source state, routed by requires() type.
+        record TtlMarker() {}
+        record OtherData() {}
+        var expiredGuard = new TransitionGuard() {
+            @Override public String name() { return "ttl"; }
+            @Override public Set<Class<?>> requires() { return Set.of(TtlMarker.class); }
+            @Override public GuardOutput evaluate(StateContext ctx) {
+                return GuardOutput.expired();
+            }
+        };
+        var acceptingGuard = new TransitionGuard() {
+            @Override public String name() { return "accept"; }
+            @Override public Set<Class<?>> requires() { return Set.of(OtherData.class); }
+            @Override public GuardOutput evaluate(StateContext ctx) {
+                return GuardOutput.accepted();
+            }
+        };
+
+        var machine = Carta.define("MultiGuardTtl")
+            .root("MultiGuardTtl")
+                .initial("Waiting")
+                .terminal("Accepted")
+                .terminal("Rejected")
+            .external("Waiting", "Rejected", expiredGuard)
+            .external("Waiting", "Accepted", acceptingGuard)
+            .build();
+
+        var engine = Carta.start(machine);
+        // Provide TtlMarker so expiredGuard is evaluated first and short-circuits.
+        var result = engine.resume(Map.of(TtlMarker.class, new TtlMarker()));
+        assertEquals(CartaEngine.ResumeResult.EXPIRED, result);
+        assertEquals("Waiting", engine.currentState().name());
+    }
 }
