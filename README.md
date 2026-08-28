@@ -535,6 +535,8 @@ var restored = Carta.restore(machine, loaded);
 restored.resume(Map.of(PaymentConfirmation.class, confirmation));
 ```
 
+**Guard failure counts are preserved** across export/restore. When `toFlowInstance` exports the engine state, the per-guard rejection counters are copied into the `FlowInstance`; `Carta.restore` loads them back into the new engine. This keeps N-strike rules (e.g. "ban after 3 failed payments") stable across long-lived flows. Counts are cleared on a successful state change, matching the in-memory contract.
+
 ---
 
 ## Why LLMs Love This

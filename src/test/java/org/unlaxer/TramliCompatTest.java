@@ -123,6 +123,59 @@ class TramliCompatTest {
         assertEquals("PaymentPending", engine.currentState().name());
     }
 
+    /**
+     * Guard failure counts must survive export → FlowStore → restore round-trip
+     * so that N-strike rules (e.g. ban after N rejections) survive long-lived flows.
+     * Regression for #7: previously extractGuardCounts() returned an empty map and
+     * toFlowInstance() did not transfer counts, so counts silently reset on restore.
+     */
+    @Test
+    void guardFailureCountsPersistAcrossExportRestore() {
+        var engine = Carta.start(orderFlow());
+        assertEquals("PaymentPending", engine.currentState().name());
+
+        // Accumulate two guard rejections for paymentGuard
+        engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX-1", 0)));
+        engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX-2", 0)));
+
+        // Export to FlowInstance — counts must transfer
+        FlowInstance instance = engine.toFlowInstance("order-persist-1");
+        assertEquals(2, instance.guardFailureCounts().getOrDefault("paymentGuard", 0));
+
+        // Persist and reload via FlowStore
+        var store = Carta.memoryStore();
+        store.save(instance);
+        FlowInstance loaded = store.load("order-persist-1").orElseThrow();
+        assertEquals(2, loaded.guardFailureCounts().getOrDefault("paymentGuard", 0));
+
+        // Restore into a fresh engine — counts must come back
+        var restored = Carta.restore(orderFlow(), loaded);
+        // A third rejection after restore should advance the count to 3, not reset to 1
+        var result = restored.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX-3", 0)));
+        assertEquals(CartaEngine.ResumeResult.REJECTED, result);
+        FlowInstance after = restored.toFlowInstance("order-persist-2");
+        assertEquals(3, after.guardFailureCounts().getOrDefault("paymentGuard", 0));
+    }
+
+    /**
+     * A successful transition clears guard failure counts (existing contract),
+     * and that clear must also be reflected when exported after the transition.
+     */
+    @Test
+    void guardFailureCountsClearedOnStateChange() {
+        var engine = Carta.start(orderFlow());
+        // One rejection
+        engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX-BAD", 0)));
+        FlowInstance before = engine.toFlowInstance("pre");
+        assertEquals(1, before.guardFailureCounts().getOrDefault("paymentGuard", 0));
+
+        // Successful transition clears counts
+        engine.resume(Map.of(PaymentConfirmation.class, new PaymentConfirmation("TX-OK", 1000)));
+        assertEquals("Shipped", engine.currentState().name());
+        FlowInstance after = engine.toFlowInstance("post");
+        assertEquals(0, after.guardFailureCounts().getOrDefault("paymentGuard", 0));
+    }
+
     @Test
     void branchTransition() {
         var flow = Carta.define("ShipFlow")
