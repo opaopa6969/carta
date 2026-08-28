@@ -45,8 +45,23 @@ public final class FlowInstance {
         return guardFailureCounts.getOrDefault(guardName, 0);
     }
 
+    /**
+     * Read-only snapshot of guard failure counts.
+     * Used by {@link CartaEngine#toFlowInstance(String)} to export counts
+     * and by the restore constructor to import them back.
+     */
+    public Map<String, Integer> guardFailureCounts() {
+        return Collections.unmodifiableMap(guardFailureCounts);
+    }
+
     void incrementGuardFailure(String guardName) {
         guardFailureCounts.merge(guardName, 1, Integer::sum);
+    }
+
+    /** Replace guard failure counts (used on restore from a persisted snapshot). */
+    void setGuardFailureCounts(Map<String, Integer> counts) {
+        guardFailureCounts.clear();
+        guardFailureCounts.putAll(counts);
     }
 
     /** Clear guard failure counts (called on actual state change, not self-transitions). */

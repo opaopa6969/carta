@@ -23,7 +23,7 @@
 ## 判断待ち（未確定の設計）
 
 - ~~`requires()` の検証単位が「全定義に存在するか」なのか「実行可能な上流経路で生成されるか」は未確定。現実装は前者、READMEは後者を示していた。~~ → **確定（#5）**: `build()` の `validateDataFlowChain` は「全定義内に producer が存在するか」の全体集合チェックを正とする。README の "upstream" 表現はこの挙動に合わせて修正済み。経路ベースの到達可能性は `DataFlowGraph.availableAt(state)` で診断提供するが `build()` の検証には用いない。厳密な経路検証の導入は別 issue で扱う。
-- guard失敗回数、作成・更新時刻を `FlowInstance` の永続化境界に含めるかは未確定。現実装にはフィールドがあるが、engineのexport/restoreとの連携は未完である。
+- guard失敗回数、作成・更新時刻を `FlowInstance` の永続化境界に含めるかは未確定。現実装にはフィールドがあるが、engineのexport/restoreとの連携は未完である。 → **確定（#7）**: 永続化境界に含める。`toFlowInstance` はガード失敗カウントを `FlowInstance` へコピーし、restore コンストラクタは `FlowInstance.guardFailureCounts()` から読み戻す。成功による状態遷移でカウントはクリアされる（インメモリ契約と同一）。README の "preserved" 表記はこの挙動を指す。
 - `GuardOutput.Expired` を `resume()` の結果として呼び出し側へ伝える契約は未確定。現実装はExpiredを個別結果に変換せず、最終的に `REJECTED` を返す。
 
 ## 要確認の設計理由

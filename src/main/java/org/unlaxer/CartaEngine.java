@@ -65,6 +65,7 @@ public final class CartaEngine {
     /** Export current state as a FlowInstance. */
     public FlowInstance toFlowInstance(String id) {
         var instance = new FlowInstance(id, currentState.name(), context);
+        instance.setGuardFailureCounts(guardFailureCounts);
         return instance;
     }
 
@@ -290,9 +291,7 @@ public final class CartaEngine {
     }
 
     private Map<String, Integer> extractGuardCounts(FlowInstance instance) {
-        // FlowInstance tracks guard failures internally; for engine restore
-        // we start with clean counts. Long-lived flows persist via FlowStore.
-        return Map.of();
+        return instance.guardFailureCounts();
     }
 
     // ─── Transition Record ──────────────────────────────────

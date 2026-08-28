@@ -535,6 +535,8 @@ var restored = Carta.restore(machine, loaded);
 restored.resume(Map.of(PaymentConfirmation.class, confirmation));
 ```
 
+**ガード失敗カウントは export/restore を通じて保持されます。** `toFlowInstance` がエンジン状態をエクスポートする際、ガードごとのリジェクト回数が `FlowInstance` にコピーされ、`Carta.restore` が新しいエンジンへ読み戻します。これにより、長期フローをまたいでも N回失敗で BAN のようなルールが安定します。成功による状態遷移でカウントはクリアされ、インメモリ契約と一致します。
+
 ---
 
 ## なぜ LLM と相性が良いか
