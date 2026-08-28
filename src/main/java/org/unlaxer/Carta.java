@@ -7,7 +7,7 @@ package org.unlaxer;
  * entry/exit actions, event bubbling) with tramli's data-flow verification
  * (requires/produces contracts, auto-chain, build-time validation).
  *
- * <h3>Harel mode — hierarchical, event-driven:</h3>
+ * <h2>Harel mode — hierarchical, event-driven:</h2>
  * <pre>
  * var machine = Carta.define("Order")
  *     .root("Order")
@@ -26,7 +26,7 @@ package org.unlaxer;
  * engine.send(paymentReceived);
  * </pre>
  *
- * <h3>tramli mode — flat, data-flow verified:</h3>
+ * <h2>tramli mode — flat, data-flow verified:</h2>
  * <pre>
  * var machine = Carta.define("Order")
  *     .root("Order")

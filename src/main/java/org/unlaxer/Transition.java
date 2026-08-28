@@ -8,6 +8,7 @@ import java.util.function.Predicate;
  * A transition in Carta. Supports four types:
  *
  * <table>
+ *   <caption>Transition types</caption>
  *   <tr><th>Type</th><th>Trigger</th><th>Origin</th></tr>
  *   <tr><td>EVENT</td><td>Explicit {@link Event}</td><td>Harel Statechart</td></tr>
  *   <tr><td>AUTO</td><td>Fires immediately</td><td>tramli</td></tr>
