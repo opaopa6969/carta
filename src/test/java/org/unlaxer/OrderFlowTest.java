@@ -364,4 +364,58 @@ class OrderFlowTest {
         assertNotNull(fi.createdAt());
         assertNotNull(fi.updatedAt());
     }
+
+    // ─── Boundary / regression tests ───────────────────────────
+
+    /**
+     * Event.of(null) must throw NullPointerException (Objects.requireNonNull)
+     * rather than silently creating an event with a null name. This pins the
+     * null-rejection contract on the public Event factory.
+     */
+    @Test
+    void eventOfNullThrowsNullPointerException() {
+        assertThrows(NullPointerException.class, () -> Event.of(null));
+    }
+
+    /**
+     * When a child state has a transition for the same event whose guard
+     * fails, the engine must bubble up to the parent's transition for that
+     * same event. findEventTransition iterates current→parent and evaluates
+     * each candidate's guard, continuing on failure — this pins that
+     * continuation behaviour.
+     */
+    @Test
+    void failedChildGuardBubblesToParentTransitionForSameEvent() {
+        // Root initial child is Start; entering Group via event lands on A
+        // (Group's initial child). A has a "toggle" event with a guard that
+        // always fails. Group (parent) also has a "toggle" event (bubbling)
+        // that should fire when the child guard rejects.
+        Event enter = Event.of("enter");
+        Event toggle = Event.of("toggle");
+        var machine = Carta.define("BubbleOnGuardFail")
+            .root("BubbleOnGuardFail")
+                .initial("Start")
+                .state("Group")
+                    .initial("A")
+                    .state("B").end()
+                .end()
+                .terminal("Exited")
+            .transition().from("Start").on(enter).to("A")
+            // child A: toggle with a guard that always fails
+            .transition().from("A").on(toggle)
+                .guard(ctx -> false)
+                .to("B")
+            // parent Group: toggle that exits (should fire via bubbling)
+            .transition().from("Group").on(toggle).to("Exited")
+            .build();
+
+        var engine = Carta.start(machine);
+        assertEquals("Start", engine.currentState().name());
+        engine.send(enter);
+        assertEquals("A", engine.currentState().name());
+        assertTrue(engine.send(toggle),
+            "child guard failure must bubble to parent transition for the same event");
+        assertEquals("Exited", engine.currentState().name());
+        assertTrue(engine.isCompleted());
+    }
 }
