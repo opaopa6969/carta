@@ -124,6 +124,98 @@ class TramliCompatTest {
     }
 
     /**
+     * #34: When resume() is rejected by a guard, the external data passed to
+     * that call must not linger in the context. A previously-absent type must
+     * remain absent after a rejection.
+     */
+    @Test
+    void resumeRejectedRollsBackExternalData() {
+        var engine = Carta.start(orderFlow());
+        assertEquals("PaymentPending", engine.currentState().name());
+        assertFalse(engine.context().has(PaymentConfirmation.class));
+
+        var result = engine.resume(Map.of(
+            PaymentConfirmation.class, new PaymentConfirmation("TX-BAD", 0)
+        ));
+
+        assertEquals(CartaEngine.ResumeResult.REJECTED, result);
+        assertEquals("PaymentPending", engine.currentState().name());
+        assertFalse(engine.context().has(PaymentConfirmation.class),
+            "rejected external data must not linger in context");
+    }
+
+    /**
+     * #34: A type that was already present in the context before resume() must
+     * be restored to its prior value when resume() is rejected, so a rejected
+     * retry cannot clobber a previously accepted value.
+     */
+    @Test
+    void resumeRejectedRestoresPriorValue() {
+        var engine = Carta.start(orderFlow());
+        assertEquals("PaymentPending", engine.currentState().name());
+        // Seed context with a prior PaymentConfirmation (e.g. from a prior step)
+        engine.context().put(PaymentConfirmation.class, new PaymentConfirmation("PRIOR", 1));
+
+        var result = engine.resume(Map.of(
+            PaymentConfirmation.class, new PaymentConfirmation("TX-BAD", 0)
+        ));
+
+        assertEquals(CartaEngine.ResumeResult.REJECTED, result);
+        assertTrue(engine.context().has(PaymentConfirmation.class));
+        assertEquals("PRIOR", engine.context().get(PaymentConfirmation.class).txId(),
+            "prior typed value must be restored after rejection");
+    }
+
+    /**
+     * #34: GuardOutput.Expired must also roll back external data.
+     */
+    @Test
+    void resumeExpiredRollsBackExternalData() {
+        TransitionGuard expGuard = new TransitionGuard() {
+            @Override public String name() { return "exp"; }
+            @Override public Set<Class<?>> requires() { return Set.of(PaymentConfirmation.class); }
+            @Override public GuardOutput evaluate(StateContext ctx) {
+                return GuardOutput.expired();
+            }
+        };
+        var machine = Carta.define("ExpRollback")
+            .root("ExpRollback")
+                .initial("Pending")
+                .terminal("Done")
+            .external("Pending", "Done", expGuard)
+            .build();
+        var engine = Carta.start(machine);
+
+        var result = engine.resume(Map.of(
+            PaymentConfirmation.class, new PaymentConfirmation("X", 0)
+        ));
+
+        assertEquals(CartaEngine.ResumeResult.EXPIRED, result);
+        assertEquals("Pending", engine.currentState().name());
+        assertFalse(engine.context().has(PaymentConfirmation.class),
+            "expired external data must not linger in context");
+    }
+
+    /**
+     * #34: Accepted resume still leaves the external data in the context
+     * (regression guard against over-aggressive rollback on the happy path).
+     */
+    @Test
+    void resumeAcceptedKeepsExternalData() {
+        var engine = Carta.start(orderFlow());
+        assertEquals("PaymentPending", engine.currentState().name());
+
+        var result = engine.resume(Map.of(
+            PaymentConfirmation.class, new PaymentConfirmation("TX-OK", 1000)
+        ));
+
+        assertEquals(CartaEngine.ResumeResult.TRANSITIONED, result);
+        assertTrue(engine.context().has(PaymentConfirmation.class),
+            "accepted external data must remain in context");
+        assertEquals("TX-OK", engine.context().get(PaymentConfirmation.class).txId());
+    }
+
+    /**
      * Guard failure counts must survive export → FlowStore → restore round-trip
      * so that N-strike rules (e.g. ban after N rejections) survive long-lived flows.
      * Regression for #7: previously extractGuardCounts() returned an empty map and

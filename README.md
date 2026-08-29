@@ -261,8 +261,8 @@ The `sealed interface` [GuardOutput](#guard-output) has exactly 3 variants:
 | Variant | Meaning |
 |---------|---------|
 | `Accepted(data)` | Guard passed. Optional data merged into context. |
-| `Rejected(reason)` | Guard refused. Failure count incremented. |
-| `Expired` | Flow TTL exceeded. |
+| `Rejected(reason)` | Guard refused. Failure count incremented. External data rolled back from context. |
+| `Expired` | Flow TTL exceeded. External data rolled back from context. |
 
 `requires()` enables [type-based routing](#multi-external-transitions-dd-020) — when multiple external transitions share a source state, the engine selects guards by matching `requires()` types against the external data.
 
@@ -407,6 +407,7 @@ When `resume()` is called, the engine:
 2. Skips guards whose required types are not present
 3. Evaluates the first matching guard
 4. Transitions on `Accepted`
+5. On `Rejected` or `Expired`, rolls back the external data passed to this call so it does not linger in the context (previously present values are restored)
 
 Self-transitions work: `Active → Active` for profile updates (no state change, guard failure counts preserved).
 
