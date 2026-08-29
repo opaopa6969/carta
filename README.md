@@ -219,6 +219,12 @@ Hierarchical state — Carta's core difference from tramli. States can nest:
 
 Composite states have an initial child. When transitioning into a composite, the engine descends to the initial child leaf.
 
+Nesting rules:
+- `state(name)` **descends** one level — it must be paired with a matching `end()` to come back up. `build()` rejects definitions with unbalanced nesting (missing `end()`), and `end()` at the root level (no open `state()` to close) is rejected.
+- `initial(name)` and `terminal(name)` **do not descend** — they register a leaf child under the current parent and stay there. The matching `end()` is therefore **not** needed after them.
+- `onEntry` / `onExit` attach to the **most recently declared state** (whichever of `state`/`initial`/`terminal`/`root` came last). After `end()`, the target is the parent you came back up to.
+- A composite may have **exactly one** `initial()` child; a second `initial()` in the same composite is rejected at `build()`.
+
 ### Event
 
 First-class event type (Harel formalism). Unlike tramli's implicit routing via `requires()`, Carta makes events explicit:
@@ -422,7 +428,7 @@ Guard names must be unique per source state — enforced at `build()`.
 | # | Check | What it catches |
 |---|-------|----------------|
 | 1 | All transition endpoints exist | Typos in state names |
-| 2 | Composite states have initial child | Missing initial in hierarchy |
+| 2 | Composite states have exactly one initial child | Missing or duplicate initial in hierarchy |
 | 3 | No transitions from [terminal](#terminal-state) states | States that should be final but aren't |
 | 4 | [Auto](#auto-transition)/[Branch](#branch-transition) transitions form a [DAG](#dag) | Infinite auto-chain loops |
 | 5 | [External](#external-transition) guard names unique per state | Ambiguous guard routing |
