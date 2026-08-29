@@ -841,4 +841,61 @@ class TramliCompatTest {
         assertTrue(readme.contains("whole-definition existence check"),
             "README must document the whole-definition existence check");
     }
+
+    // ─── Boundary / regression tests ───────────────────────────
+
+    /**
+     * Carta.start(machine, ctx) must use the caller-supplied context — the
+     * auto-chain reads pre-populated values from it. This pins the
+     * context-by-reference contract on the public factory.
+     */
+    @Test
+    void startWithCustomContextUsesPrePopulatedContext() {
+        var ctx = new StateContext();
+        ctx.put("seed", "PRE-SEEDED");
+
+        StateProcessor reader = new StateProcessor() {
+            @Override public Set<Class<?>> produces() { return Set.of(TrackingNumber.class); }
+            @Override public void process(StateContext ctx) {
+                String seed = ctx.get("seed", String.class);
+                ctx.put(TrackingNumber.class, new TrackingNumber("TRACK-" + seed));
+            }
+        };
+
+        var machine = Carta.define("CustomCtx")
+            .root("CustomCtx")
+                .initial("Created")
+                .terminal("Shipped")
+            .auto("Created", "Shipped", reader)
+            .build();
+
+        var engine = Carta.start(machine, ctx);
+        assertEquals("Shipped", engine.currentState().name());
+        assertSame(ctx, engine.context(),
+            "Carta.start(machine, ctx) must retain the same context instance");
+        assertEquals("TRACK-PRE-SEEDED",
+            engine.context().get(TrackingNumber.class).value(),
+            "pre-populated string-keyed data must be visible to the auto-chain processor");
+    }
+
+    /**
+     * Carta.restore() must NOT fire auto-chain — it resumes at the exact
+     * persisted state. This is the critical difference from Carta.start(),
+     * and a regression here would silently double-fire transitions.
+     */
+    @Test
+    void restoreDoesNotFireAutoChain() {
+        var engine = Carta.start(orderFlow());
+        // auto-chain ran: Created → PaymentPending (waiting for external)
+        assertEquals("PaymentPending", engine.currentState().name());
+
+        var instance = engine.toFlowInstance("restore-no-auto");
+        // Persist and restore into a fresh engine — auto-chain must NOT re-fire.
+        var restored = Carta.restore(orderFlow(), instance);
+        assertEquals("PaymentPending", restored.currentState().name(),
+            "restore must land on the persisted state, not re-run auto-chain");
+        // Only the original auto transition is in the log; restore adds none.
+        assertEquals(0, restored.log().size(),
+            "restored engine log must be empty — auto-chain must not fire on restore");
+    }
 }

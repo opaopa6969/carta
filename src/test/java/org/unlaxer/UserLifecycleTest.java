@@ -286,4 +286,26 @@ class UserLifecycleTest {
         assertEquals(CartaEngine.ResumeResult.EXPIRED, result);
         assertEquals("Waiting", engine.currentState().name());
     }
+
+    /**
+     * When resume() provides data whose types don't match any guard's
+     * requires(), all guards are skipped. The result must be REJECTED and
+     * the external data must be rolled back from the context (must not
+     * linger). This pins the rollback contract for the "no guard matched"
+     * branch, distinct from "a guard was evaluated and rejected".
+     */
+    @Test
+    void resumeWithUnmatchedDataTypeRollsBackExternalData() {
+        record UnrelatedData() {}
+        var engine = Carta.start(userLifecycle());
+        engine.resume(Map.of());  // → Active
+        assertEquals("Active", engine.currentState().name());
+
+        var result = engine.resume(Map.of(UnrelatedData.class, new UnrelatedData()));
+        assertEquals(CartaEngine.ResumeResult.REJECTED, result,
+            "no matching guard means rejection");
+        assertEquals("Active", engine.currentState().name());
+        assertFalse(engine.context().has(UnrelatedData.class),
+            "unmatched external data must not linger in context");
+    }
 }
