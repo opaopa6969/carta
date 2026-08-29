@@ -557,6 +557,93 @@ class TramliCompatTest {
             "Composite state MissingCompositeInitial has no initial child"));
     }
 
+    /**
+     * #33 case 1: onEntry/onExit immediately after initial()/terminal() must
+     * attach to that state, not to the current parent (root).
+     */
+    @Test
+    void onEntryAfterInitialAttachesToThatState() {
+        List<String> order = new ArrayList<>();
+        var machine = Carta.define("Repro")
+            .root("Repro")
+                .onEntry(ctx -> order.add("root"))
+                .initial("A")
+                .onEntry(ctx -> order.add("second"))
+                .terminal("B")
+            .transition().from("A").on(Event.of("go")).to("B")
+            .build();
+        Carta.start(machine);
+        // Both root and A entry actions should fire on entry into A.
+        assertTrue(order.contains("root"));
+        assertTrue(order.contains("second"),
+            "onEntry after initial() must attach to that initial state, not overwrite root");
+        // Order: root first (entering root), then A (entering A as initial child).
+        int rootIdx = order.indexOf("root");
+        int secondIdx = order.indexOf("second");
+        assertTrue(rootIdx < secondIdx, "root entry should fire before A entry");
+    }
+
+    /**
+     * #33 case 3: duplicate initial() within the same composite must fail build().
+     */
+    @Test
+    void duplicateInitialChildFailsAtBuildTime() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("Repro3")
+                .root("Repro3")
+                    .initial("First")
+                    .initial("Second")
+                    .terminal("Done")
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("Repro3"));
+        assertTrue(ex.getMessage().contains("initial children"));
+    }
+
+    /**
+     * #33 case 4: missing end() leaves currentParent below root at build(),
+     * which must be detected and rejected.
+     */
+    @Test
+    void missingEndFailsAtBuildTime() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("Repro4")
+                .root("Repro4")
+                    .initial("Created")
+                    .state("Processing")
+                        .initial("PaymentPending")
+                    .terminal("Cancelled")
+                .transition().from("Created").on(Event.of("start")).to("PaymentPending")
+                .transition().from("Processing").on(Event.of("cancel")).to("Cancelled")
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("missing end()"));
+        assertTrue(ex.getMessage().contains("Processing"));
+    }
+
+    /**
+     * #33: excess end() (calling end() at root level with no open state()) must
+     * be rejected rather than silently no-op'ing.
+     */
+    @Test
+    void excessEndFailsAtBuildTime() {
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("ExcessEnd")
+                .root("ExcessEnd")
+                    .initial("A")
+                    .terminal("B")
+                .end()
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("end()"));
+    }
+
     @Test
     void branchTargetMustExistAtBuildTime() {
         var ex = assertThrows(CartaException.class, () ->

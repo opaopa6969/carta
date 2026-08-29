@@ -6,7 +6,7 @@
 
 - 対象は Java 21 以上の、依存ゼロ（実行時）の状態機械ライブラリである。
 - 定義は `Carta.define(...).build()` で確定し、`build()` に失敗した定義は実行できない。
-- 状態は階層化できる。複合状態には初期子が必要で、実行時の現在状態は葉として扱う。
+- 状態は階層化できる。複合状態には初期子が正確に1つ必要で、実行時の現在状態は葉として扱う。`state()` は1段降下し対応する `end()` で昇格するが、`initial()` / `terminal()` は降下しない。`build()` は `end()` の不足（`currentParent` が root に戻らない）と root での過剰 `end()` を拒否する。`onEntry` / `onExit` は直前に宣言した状態に付く。
 - Event 遷移は `send(Event)`、型付き外部データによる External 遷移は `resume(Map<Class<?>, Object>)` で起動する。
 - External 遷移の `requires()` は、同じsource stateにある複数guardの振り分けに使われる。入力に必要な型が無いguardは評価しない。
 - `Accepted` のデータはコンテキストに追加され、`Rejected` は遷移しない。`Expired` は `resume()` の戻り値 `ResumeResult.EXPIRED` として呼び出し側へ伝える。`Rejected` / `Expired` のいずれの場合も、その `resume()` 呼び出しで渡された外部データはコンテキストからロールバックされ（元からあった値は復元、新規キーは除去）、拒否されたデータが後続処理に読まれないことを防ぐ。

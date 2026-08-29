@@ -256,11 +256,18 @@ public final class StateMachine {
         }
     }
 
-    /** V2: Composite states have initial child. */
+    /** V2: Composite states have exactly one initial child. */
     private void validateCompositeInitials(List<String> errors) {
         for (StateNode node : stateIndex.values()) {
-            if (node.isComposite() && node.initialChild().isEmpty())
-                errors.add("Composite state " + node.name() + " has no initial child");
+            if (node.isComposite()) {
+                long initials = node.children().stream().filter(c -> c.isInitial()).count();
+                if (initials == 0) {
+                    errors.add("Composite state " + node.name() + " has no initial child");
+                } else if (initials > 1) {
+                    errors.add("Composite state " + node.name() + " has " + initials +
+                        " initial children — exactly one is required");
+                }
+            }
         }
     }
 
@@ -373,6 +380,7 @@ public final class StateMachine {
         private final String machineName;
         private StateNode root;
         private StateNode currentParent;
+        private StateNode lastCreated;
         private final List<Transition> transitions = new ArrayList<>();
 
         Builder(String name) { this.machineName = name; }
@@ -382,6 +390,7 @@ public final class StateMachine {
         public Builder root(String name) {
             root = new StateNode(name, null, false);
             currentParent = root;
+            lastCreated = root;
             return this;
         }
 
@@ -389,6 +398,7 @@ public final class StateMachine {
             var child = new StateNode(name, currentParent, false);
             child.setInitial(true);
             currentParent.addChild(child);
+            lastCreated = child;
             return this;
         }
 
@@ -396,27 +406,34 @@ public final class StateMachine {
             var child = new StateNode(name, currentParent, false);
             currentParent.addChild(child);
             currentParent = child;
+            lastCreated = child;
             return this;
         }
 
         public Builder terminal(String name) {
             var child = new StateNode(name, currentParent, true);
             currentParent.addChild(child);
+            lastCreated = child;
             return this;
         }
 
         public Builder onEntry(Consumer<StateContext> action) {
-            currentParent.setEntryAction(action);
+            lastCreated.setEntryAction(action);
             return this;
         }
 
         public Builder onExit(Consumer<StateContext> action) {
-            currentParent.setExitAction(action);
+            lastCreated.setExitAction(action);
             return this;
         }
 
         public Builder end() {
-            if (currentParent.parent() != null) currentParent = currentParent.parent();
+            if (currentParent == root) {
+                throw new CartaException("INVALID_DEFINITION",
+                    "end() called at root level — no open state() to close");
+            }
+            currentParent = currentParent.parent();
+            lastCreated = currentParent;
             return this;
         }
 
@@ -449,6 +466,12 @@ public final class StateMachine {
 
         public StateMachine build() {
             if (root == null) throw new CartaException("No root state defined");
+            if (currentParent != root) {
+                throw new CartaException("INVALID_DEFINITION",
+                    "Unbalanced state nesting: missing end() for state '" +
+                    currentParent.name() + "' (currentParent is not back at root '" +
+                    root.name() + "' at build())");
+            }
             return new StateMachine(machineName, root, transitions);
         }
     }
