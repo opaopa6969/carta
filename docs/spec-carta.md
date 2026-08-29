@@ -9,7 +9,7 @@
 - 状態は階層化できる。複合状態には初期子が必要で、実行時の現在状態は葉として扱う。
 - Event 遷移は `send(Event)`、型付き外部データによる External 遷移は `resume(Map<Class<?>, Object>)` で起動する。
 - External 遷移の `requires()` は、同じsource stateにある複数guardの振り分けに使われる。入力に必要な型が無いguardは評価しない。
-- `Accepted` のデータはコンテキストに追加され、`Rejected` は遷移しない。`Expired` は `resume()` の戻り値 `ResumeResult.EXPIRED` として呼び出し側へ伝える。
+- `Accepted` のデータはコンテキストに追加され、`Rejected` は遷移しない。`Expired` は `resume()` の戻り値 `ResumeResult.EXPIRED` として呼び出し側へ伝える。`Rejected` / `Expired` のいずれの場合も、その `resume()` 呼び出しで渡された外部データはコンテキストからロールバックされ（元からあった値は復元、新規キーは除去）、拒否されたデータが後続処理に読まれないことを防ぐ。
 - Event / External 遷移の後は Auto / Branch 遷移を自動実行し、terminal state または外部入力待ちで停止する。自動連鎖の上限は10である。
 - terminal stateからの遷移は定義できない。entry/exit actionは階層のLCAを境に実行される。
 - `FlowStore` は `FlowInstance` の保存・読出し・削除を担うSPIであり、同梱実装はインメモリのみである。

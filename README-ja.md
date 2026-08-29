@@ -261,8 +261,8 @@ public interface TransitionGuard {
 | バリアント | 意味 |
 |-----------|------|
 | `Accepted(data)` | Guard 通過。オプションのデータをコンテキストにマージ。 |
-| `Rejected(reason)` | Guard 拒否。失敗カウント増加。 |
-| `Expired` | フロー TTL 超過。 |
+| `Rejected(reason)` | Guard 拒否。失敗カウント増加。外部データはコンテキストからロールバック。 |
+| `Expired` | フロー TTL 超過。外部データはコンテキストからロールバック。 |
 
 `requires()` は[型ベースルーティング](#multi-external-遷移-dd-020)を可能にする — 複数の external 遷移が同じソース状態を共有するとき、エンジンは `requires()` の型を外部データとマッチングしてガードを選択する。
 
@@ -407,6 +407,7 @@ resume(PaymentConfirmation)
 2. 必要な型が存在しないガードをスキップ
 3. マッチした最初のガードを評価
 4. `Accepted` で遷移
+5. `Rejected` / `Expired` の場合は今回渡された外部データをコンテキストからロールバック（元からあった値は復元され、新規キーは除去される）
 
 自己遷移も動作: `Active → Active`（プロフィール更新 — 状態変化なし、ガード失敗カウント保持）。
 

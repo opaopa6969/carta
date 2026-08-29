@@ -72,6 +72,32 @@ public final class StateContext {
         typed.putAll(data);
     }
 
+    /**
+     * Capture the current typed values for the given key set (keys absent
+     * from the context are omitted from the result). Used to take a
+     * rollback snapshot before temporarily injecting external data.
+     */
+    Map<Class<?>, Object> captureTypedSnapshot(Set<Class<?>> keys) {
+        var snap = new LinkedHashMap<Class<?>, Object>();
+        for (Class<?> k : keys) {
+            Object v = typed.get(k);
+            if (v != null) snap.put(k, v);
+        }
+        return snap;
+    }
+
+    /**
+     * Restore the typed slot to a previously captured snapshot within the
+     * given scope: every key in {@code scope} is removed first, then the
+     * entries of {@code snapshot} are put back. Keys present in the scope
+     * but absent from the snapshot end up removed; keys present in the
+     * snapshot are restored to their captured value.
+     */
+    void restoreTyped(Map<Class<?>, Object> snapshot, Set<Class<?>> scope) {
+        for (Class<?> k : scope) typed.remove(k);
+        typed.putAll(snapshot);
+    }
+
     public Map<String, Object> snapshot() {
         var snap = new LinkedHashMap<String, Object>(attrs);
         for (var entry : typed.entrySet()) {

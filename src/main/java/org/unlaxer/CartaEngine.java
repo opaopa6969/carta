@@ -120,10 +120,15 @@ public final class CartaEngine {
     public ResumeResult resume(Map<Class<?>, Object> externalData) {
         if (isCompleted()) return ResumeResult.ALREADY_COMPLETED;
 
+        Set<Class<?>> scope = externalData.keySet();
+        Map<Class<?>, Object> rollback = context.captureTypedSnapshot(scope);
         context.putAllTyped(externalData);
 
         List<Transition> externals = findExternalTransitions(currentState);
-        if (externals.isEmpty()) return ResumeResult.NO_APPLICABLE_TRANSITION;
+        if (externals.isEmpty()) {
+            context.restoreTyped(rollback, scope);
+            return ResumeResult.NO_APPLICABLE_TRANSITION;
+        }
 
         for (Transition t : externals) {
             TransitionGuard guard = t.transitionGuard();
@@ -156,9 +161,11 @@ public final class CartaEngine {
                 guardFailureCounts.merge(guard.name(), 1, Integer::sum);
             } else if (output instanceof GuardOutput.Expired) {
                 // TTL exceeded — propagate to caller without counting as rejection.
+                context.restoreTyped(rollback, scope);
                 return ResumeResult.EXPIRED;
             }
         }
+        context.restoreTyped(rollback, scope);
         return ResumeResult.REJECTED;
     }
 
