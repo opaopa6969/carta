@@ -211,6 +211,10 @@ public final class CartaEngine {
 
     private void executeBranchTransition(Transition t) {
         String label = t.branchProcessor().decide(context);
+        if (label == null) {
+            throw new CartaException("BRANCH_ERROR",
+                "Branch returned null label from state " + t.from());
+        }
         String target = t.branchTargets().get(label);
         if (target == null) {
             throw new CartaException("BRANCH_ERROR",

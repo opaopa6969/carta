@@ -424,6 +424,34 @@ class TramliCompatTest {
     }
 
     @Test
+    void branchNullLabelThrowsCartaException() {
+        BranchProcessor nullDecider = new BranchProcessor() {
+            @Override public Set<Class<?>> requires() { return Set.of(ShipmentReady.class); }
+            @Override public String decide(StateContext ctx) { return null; }
+        };
+        var flow = Carta.define("NullBranch")
+            .root("NullBranch")
+                .initial("Pending")
+                .state("Routing").end()
+                .terminal("ExpressShipped")
+                .terminal("StandardShipped")
+            .auto("Pending", "Routing", new StateProcessor() {
+                @Override public Set<Class<?>> produces() { return Set.of(ShipmentReady.class); }
+                @Override public void process(StateContext ctx) {
+                    ctx.put(ShipmentReady.class, new ShipmentReady(false));
+                }
+            })
+            .branch("Routing", nullDecider, Map.of(
+                "express", "ExpressShipped",
+                "standard", "StandardShipped"
+            ))
+            .build();
+        var ex = assertThrows(CartaException.class, () -> Carta.start(flow));
+        assertEquals("BRANCH_ERROR", ex.code());
+        assertTrue(ex.getMessage().contains("null"));
+    }
+
+    @Test
     void compositeWithoutInitialChildFailsAtBuildTime() {
         var ex = assertThrows(CartaException.class, () ->
             Carta.define("MissingCompositeInitial")
