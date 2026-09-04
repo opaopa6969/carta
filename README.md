@@ -394,7 +394,25 @@ resume(PaymentConfirmation)
 
 **One call, two transitions.** Each processor only knows its own step.
 
-Safety: auto-chain depth capped at 10. [DAG validation](#build-time-validation) at build time ensures Auto/Branch transitions cannot form cycles.
+Safety: auto-chain depth is capped at 10, and the chain never stops silently mid-way. If the cap is
+reached while an Auto/Branch transition is *still eligible*, the engine throws
+`CartaException` with code `AUTO_CHAIN_LIMIT`, naming the state it stopped on, the limit,
+and the transitions it traversed:
+
+```
+[AUTO_CHAIN_LIMIT] Auto-chain exceeded the depth limit of 10 at state S10 — an auto/branch
+transition is still eligible there, so the chain was cut short. Last 10 transition(s):
+S0 --[[auto]]--> S1, ... Check the auto/branch definitions of DepthBound for a cycle through
+a composite state's initial child, or split the chain with an external transition.
+```
+
+Stopping because nothing else applies — the ordinary case, including a chain of exactly 10 steps —
+returns normally. This matters for long-lived flows: a chain that stopped mid-way leaves the engine
+on an intermediate state that is indistinguishable from a legitimate external wait, and
+[`Carta.restore`](#flowstore-persistence) does not re-run the auto-chain.
+
+[DAG validation](#build-time-validation) at build time catches Auto/Branch cycles first, so
+`AUTO_CHAIN_LIMIT` is reserved for chains that are genuinely longer than the cap.
 
 ---
 
@@ -430,7 +448,7 @@ Guard names must be unique per source state — enforced at `build()`.
 | 1 | All transition endpoints exist | Typos in state names |
 | 2 | Composite states have exactly one initial child | Missing or duplicate initial in hierarchy |
 | 3 | No transitions from [terminal](#terminal-state) states | States that should be final but aren't |
-| 4 | [Auto](#auto-transition)/[Branch](#branch-transition) transitions form a [DAG](#dag) | Infinite auto-chain loops |
+| 4 | [Auto](#auto-transition)/[Branch](#branch-transition) transitions form a [DAG](#dag), with targets resolved to their leaf | Infinite auto-chain loops, including a chain that returns through a composite state's initial child |
 | 5 | [External](#external-transition) guard names unique per state | Ambiguous guard routing |
 | 6 | All [branch](#branch-transition) targets defined | `decide()` returning unknown label |
 | 7 | [requires/produces](#requires--produces-contract) chain integrity | "Data not available" errors at runtime |
@@ -628,7 +646,7 @@ Carta works for any system with **states, transitions, and external events**:
 | Term | Definition |
 |------|-----------|
 | <a id="auto-transition"></a>**Auto transition** | A transition that fires immediately when the previous step completes. No external event needed. Engine executes it as part of [auto-chain](#auto-chain). |
-| <a id="auto-chain"></a>**Auto-chain** | The engine's behavior of executing consecutive Auto and Branch transitions until an External transition or terminal state is reached. Max depth: 10. |
+| <a id="auto-chain"></a>**Auto-chain** | The engine's behavior of executing consecutive Auto and Branch transitions until an External transition or terminal state is reached. Max depth: 10; exceeding it raises `AUTO_CHAIN_LIMIT` rather than stopping silently. |
 | <a id="branch-transition"></a>**Branch transition** | A transition where a [BranchProcessor](#branchprocessor) decides the target state by returning a label. Fires immediately like Auto. |
 | <a id="dag"></a>**DAG** | Directed Acyclic Graph. Auto/Branch transitions must form a DAG — no cycles. Verified by [build()](#build-time-validation). |
 | <a id="event-transition"></a>**Event transition** | A transition triggered by an explicit [Event](#event) object. Harel Statechart formalism. Supports guards and actions. |

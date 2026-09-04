@@ -394,7 +394,23 @@ resume(PaymentConfirmation)
 
 **1回の呼び出しで2つの遷移。** 各 Processor は自分のステップだけを知っている。
 
-安全性: Auto-chain の深さ上限は 10。[DAG 検証](#ビルド時検証)がビルド時に Auto/Branch 遷移の循環を検出する。
+安全性: Auto-chain の深さ上限は 10。かつ、連鎖が途中で無音停止することはない。上限に達した時点で
+Auto/Branch 遷移が**まだ実行可能**な場合、engine は error code `AUTO_CHAIN_LIMIT` の `CartaException`
+を送出し、停止した state・上限値・辿った遷移列をメッセージに含める:
+
+```
+[AUTO_CHAIN_LIMIT] Auto-chain exceeded the depth limit of 10 at state S10 — an auto/branch
+transition is still eligible there, so the chain was cut short. Last 10 transition(s):
+S0 --[[auto]]--> S1, ... Check the auto/branch definitions of DepthBound for a cycle through
+a composite state's initial child, or split the chain with an external transition.
+```
+
+実行可能な遷移が無くなって止まる通常の場合（ちょうど 10 手で終わる連鎖を含む）は従来どおり正常に戻る。
+長時間 flow ではこの区別が効く: 途中で切られた連鎖は engine を中間状態に残し、それは正当な外部入力待ちと
+見分けがつかないうえ、[`Carta.restore`](#flowstore-永続化) は auto-chain を再実行しないためである。
+
+[DAG 検証](#ビルド時検証)がビルド時に Auto/Branch の循環を先に検出するので、`AUTO_CHAIN_LIMIT` は
+「本当に上限より長い連鎖」に絞られる。
 
 ---
 
@@ -430,7 +446,7 @@ resume(PaymentConfirmation)
 | 1 | 全遷移端点が存在する | 状態名のタイポ |
 | 2 | 合成状態が初期子を正確に1つ持つ | 階層内の初期状態の不足または重複 |
 | 3 | [終端](#終端状態)状態からの遷移がない | 終了すべき状態が終了しない |
-| 4 | [Auto](#auto-遷移)/[Branch](#branch-遷移) 遷移が [DAG](#dag) を形成 | 無限 Auto-chain ループ |
+| 4 | [Auto](#auto-遷移)/[Branch](#branch-遷移) 遷移が [DAG](#dag) を形成（遷移先は葉に解決して判定） | 無限 Auto-chain ループ。複合状態の初期子を経由して戻る循環を含む |
 | 5 | [External](#external-遷移) ガード名がソース状態ごとに一意 | 曖昧なガードルーティング |
 | 6 | 全 [Branch](#branch-遷移) ターゲットが定義済み | `decide()` が未知ラベルを返す |
 | 7 | [requires/produces](#requires--produces-契約) チェーン整合性 | ランタイムの「データがない」エラー |
@@ -555,7 +571,7 @@ restored.resume(Map.of(PaymentConfirmation.class, confirmation));
 | 「変更が他を壊さないか？」 | 1 Processor = 1 閉じた単位 |
 | 「エッジケースを忘れた」 | `sealed interface` [GuardOutput](#guard-output) → コンパイラが警告 |
 | 「フロー図が古い」 | [コードから生成](#mermaid-図の自動生成) |
-| 「無限ループを作ってしまった」 | [DAG チェック](#ビルド時検証)がビルド時に検出 |
+| 「無限ループを作ってしまった」 | [DAG チェック](#ビルド時検証)がビルド時に検出。すり抜けても runtime が `AUTO_CHAIN_LIMIT` で知らせる |
 | 「階層も検証も両方ほしい」 | Carta は両方持っている |
 
 **核心原則: LLM はハルシネートするが、コンパイラと `build()` はしない。**
@@ -628,7 +644,7 @@ Carta は**状態、遷移、外部イベント**を持つあらゆるシステ�
 | 用語 | 定義 |
 |-----|------|
 | <a id="auto-遷移"></a>**Auto 遷移** | 前のステップ完了時に即座に発火する遷移。外部イベント不要。[Auto-chain](#auto-chain自動連鎖) の一部としてエンジンが実行。 |
-| <a id="auto-chain"></a>**Auto-chain** | Auto と Branch の連続遷移を External 遷移か終端状態に到達するまで実行するエンジンの動作。最大深度: 10。 |
+| <a id="auto-chain"></a>**Auto-chain** | Auto と Branch の連続遷移を External 遷移か終端状態に到達するまで実行するエンジンの動作。最大深度: 10。超過時は無音停止せず `AUTO_CHAIN_LIMIT` を送出する。 |
 | <a id="branch-遷移"></a>**Branch 遷移** | [BranchProcessor](#branchprocessor) がラベルを返してターゲット状態を決定する遷移。Auto と同様に即座に発火。 |
 | <a id="dag"></a>**DAG** | 有向非巡回グラフ。Auto/Branch 遷移は DAG を形成しなければならない — 循環禁止。[build()](#ビルド時検証) で検証。 |
 | <a id="event-遷移"></a>**Event 遷移** | 明示的 [Event](#event) オブジェクトで発火する遷移。Harel Statechart 形式主義。Guard と Action をサポート。 |

@@ -665,8 +665,15 @@ class TramliCompatTest {
         assertEquals(10, CartaEngine.MAX_AUTO_CHAIN_DEPTH);
     }
 
+    /**
+     * A chain longer than the depth bound must fail loudly (#40).
+     *
+     * <p>Before this contract the engine returned normally on an intermediate
+     * state, which a caller cannot tell apart from a legitimate external wait —
+     * and this definition is a valid DAG, so {@code build()} blesses it.</p>
+     */
     @Test
-    void autoChainStopsWithoutExceptionAtMaximumDepth() {
+    void autoChainBeyondMaximumDepthThrowsAutoChainLimit() {
         StateProcessor noop = ctx -> {};
         var builder = Carta.define("DepthBound")
             .root("DepthBound")
@@ -679,13 +686,208 @@ class TramliCompatTest {
         }
 
         var machine = builder.build();
-        var engine = assertDoesNotThrow(() -> Carta.start(machine));
+        assertFalse(machine.autoTransitionsFrom("S" + CartaEngine.MAX_AUTO_CHAIN_DEPTH).isEmpty(),
+            "an eligible eleventh transition is what makes this a truncation, not a normal stop");
 
-        assertEquals("S" + CartaEngine.MAX_AUTO_CHAIN_DEPTH,
-            engine.currentState().name());
+        var ex = assertThrows(CartaException.class, () -> Carta.start(machine));
+
+        assertEquals("AUTO_CHAIN_LIMIT", ex.code());
+        assertTrue(ex.getMessage().contains("S" + CartaEngine.MAX_AUTO_CHAIN_DEPTH),
+            "message must name the state where the chain was cut short: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains(String.valueOf(CartaEngine.MAX_AUTO_CHAIN_DEPTH)),
+            "message must state the limit: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("DepthBound"),
+            "message must name the definition to inspect: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("S0 --[[auto]]--> S1"),
+            "message must carry the traversed transitions: " + ex.getMessage());
+    }
+
+    /** Boundary: exactly the depth bound with nothing left to fire is a normal stop. */
+    @Test
+    void autoChainAtExactlyMaximumDepthDoesNotThrow() {
+        StateProcessor noop = ctx -> {};
+        var builder = Carta.define("DepthExact")
+            .root("DepthExact")
+                .initial("S0");
+        for (int i = 1; i < CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+            builder.state("S" + i).end();
+        }
+        builder.terminal("S" + CartaEngine.MAX_AUTO_CHAIN_DEPTH);
+        for (int i = 0; i < CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+            builder.auto("S" + i, "S" + (i + 1), noop);
+        }
+
+        var engine = assertDoesNotThrow(() -> Carta.start(builder.build()));
+
+        assertEquals("S" + CartaEngine.MAX_AUTO_CHAIN_DEPTH, engine.currentState().name());
         assertEquals(CartaEngine.MAX_AUTO_CHAIN_DEPTH, engine.log().size());
-        assertFalse(machine.autoTransitionsFrom(engine.currentState().name()).isEmpty(),
-            "an eligible eleventh transition proves the chain stopped at the depth bound");
+        assertTrue(engine.isCompleted());
+    }
+
+    /** Boundary: the bound counts one chain, not the engine's lifetime. */
+    @Test
+    void autoChainDepthIsPerCallNotCumulative() {
+        StateProcessor noop = ctx -> {};
+        Event step = Event.of("step");
+        var builder = Carta.define("PerCall")
+            .root("PerCall")
+                .initial("A0");
+        // Two event-separated chains of MAX-1 auto steps each.
+        for (int leg = 0; leg < 2; leg++) {
+            for (int i = 1; i < CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+                builder.state("A" + leg + "_" + i).end();
+            }
+        }
+        builder.state("A1_0").end().terminal("Done");
+        for (int i = 1; i < CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+            builder.auto(i == 1 ? "A0" : "A0_" + (i - 1), "A0_" + i, noop);
+        }
+        for (int i = 1; i < CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+            builder.auto(i == 1 ? "A1_0" : "A1_" + (i - 1), "A1_" + i, noop);
+        }
+        builder.transition()
+            .from("A0_" + (CartaEngine.MAX_AUTO_CHAIN_DEPTH - 1))
+            .on(step).to("A1_0");
+
+        var engine = assertDoesNotThrow(() -> Carta.start(builder.build()));
+        assertEquals("A0_" + (CartaEngine.MAX_AUTO_CHAIN_DEPTH - 1), engine.currentState().name());
+
+        assertDoesNotThrow(() -> engine.send(step));
+        assertEquals("A1_" + (CartaEngine.MAX_AUTO_CHAIN_DEPTH - 1), engine.currentState().name());
+    }
+
+    /**
+     * V4 must resolve auto targets to their leaf the way the engine does (#40).
+     * {@code P1 -> Processing} is {@code P1 -> P1} at runtime, because P1 is
+     * Processing's initial child.
+     */
+    @Test
+    void autoCycleThroughCompositeInitialChildDetectedAtBuild() {
+        StateProcessor noop = ctx -> {};
+
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("HierCycle")
+                .root("HierCycle")
+                    .initial("Start")
+                    .state("Processing")
+                        .initial("P1")
+                    .end()
+                    .terminal("Done")
+                .auto("Start", "P1", noop)
+                .auto("P1", "Processing", noop)
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("cycle"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("P1"),
+            "message must name the resolved leaf, not only the declared composite: " + ex.getMessage());
+    }
+
+    /** Same resolution gap, reached through a branch label. */
+    @Test
+    void branchCycleThroughCompositeInitialChildDetectedAtBuild() {
+        StateProcessor noop = ctx -> {};
+
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("HierBranchCycle")
+                .root("HierBranchCycle")
+                    .initial("Start")
+                    .state("Processing")
+                        .initial("P1")
+                    .end()
+                    .terminal("Done")
+                .auto("Start", "P1", noop)
+                .branch("P1", ctx -> "loop", Map.of("loop", "Processing"))
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("cycle"), ex.getMessage());
+    }
+
+    /**
+     * Target resolution must never mask V2. A composite with no initial child
+     * cannot be resolved, so V4 leaves the declared name alone and V2 reports it.
+     */
+    @Test
+    void unresolvableAutoTargetStillReportsMissingInitialChild() {
+        StateProcessor noop = ctx -> {};
+
+        var ex = assertThrows(CartaException.class, () ->
+            Carta.define("NoInitial")
+                .root("NoInitial")
+                    .initial("Start")
+                    .state("Group")
+                        .state("Inner").end()
+                    .end()
+                    .terminal("Done")
+                .auto("Start", "Group", noop)
+                .build()
+        );
+
+        assertEquals("INVALID_DEFINITION", ex.code());
+        assertTrue(ex.getMessage().contains("Composite state Group has no initial child"),
+            "V2 must still be the reported error: " + ex.getMessage());
+    }
+
+    /**
+     * Resolving targets must not invent edges. An auto transition declared from
+     * a composite is never fired by the engine (it looks up by exact leaf name),
+     * so sources stay unresolved and this definition must still build.
+     */
+    @Test
+    void autoTargetResolutionDoesNotCreateFalseCycles() {
+        StateProcessor noop = ctx -> {};
+
+        var machine = assertDoesNotThrow(() ->
+            Carta.define("NoFalseCycle")
+                .root("NoFalseCycle")
+                    .initial("Start")
+                    .state("Processing")
+                        .initial("P1")
+                        .state("P2").end()
+                    .end()
+                    .terminal("Done")
+                .auto("Start", "Processing", noop)   // resolves to P1
+                .auto("P1", "P2", noop)
+                .auto("P2", "Done", noop)
+                .build()
+        );
+
+        var engine = Carta.start(machine);
+        assertTrue(engine.isCompleted());
+        assertEquals("Done", engine.currentState().name());
+    }
+
+    /** The limit applies to chains started by resume(), not only by start(). */
+    @Test
+    void autoChainLimitAlsoAppliesAfterResume() {
+        StateProcessor noop = ctx -> {};
+        TransitionGuard go = new TransitionGuard() {
+            @Override public String name() { return "go"; }
+            @Override public Set<Class<?>> requires() { return Set.of(OrderId.class); }
+            @Override public GuardOutput evaluate(StateContext ctx) { return GuardOutput.accepted(); }
+        };
+
+        var builder = Carta.define("ResumeDepth")
+            .root("ResumeDepth")
+                .initial("Waiting")
+                .state("S0").end();
+        for (int i = 1; i <= CartaEngine.MAX_AUTO_CHAIN_DEPTH + 1; i++) {
+            builder.state("S" + i).end();
+        }
+        builder.external("Waiting", "S0", go);
+        for (int i = 0; i <= CartaEngine.MAX_AUTO_CHAIN_DEPTH; i++) {
+            builder.auto("S" + i, "S" + (i + 1), noop);
+        }
+
+        var engine = Carta.start(builder.build());
+        assertEquals("Waiting", engine.currentState().name());
+
+        var ex = assertThrows(CartaException.class,
+            () -> engine.resume(Map.of(OrderId.class, new OrderId("ORD-1"))));
+        assertEquals("AUTO_CHAIN_LIMIT", ex.code());
     }
 
     @Test
