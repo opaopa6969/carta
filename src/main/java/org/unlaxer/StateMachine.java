@@ -280,16 +280,27 @@ public final class StateMachine {
         }
     }
 
-    /** V4: Auto/Branch transitions form a DAG (no cycles). */
+    /**
+     * V4: Auto/Branch transitions form a DAG (no cycles).
+     *
+     * <p>Targets are resolved to their leaf the same way {@link #resolveToLeaf}
+     * does at runtime, so a chain that returns to a state through a composite's
+     * initial child is detected here instead of silently cutting the auto-chain
+     * short at execution time. Sources are <em>not</em> resolved: the engine
+     * looks up auto/branch transitions by exact state name, so resolving them
+     * would invent edges the engine never walks.</p>
+     */
     private void validateAutoDAG(List<String> errors) {
         // Build adjacency for auto + branch transitions only
         Map<String, Set<String>> adj = new LinkedHashMap<>();
         for (Transition t : transitions) {
             if (t.type() == Transition.Type.AUTO) {
-                adj.computeIfAbsent(t.from(), k -> new LinkedHashSet<>()).add(t.to());
+                adj.computeIfAbsent(t.from(), k -> new LinkedHashSet<>())
+                    .add(resolveTargetForValidation(t.to()));
             } else if (t.type() == Transition.Type.BRANCH) {
                 for (String target : t.branchTargets().values()) {
-                    adj.computeIfAbsent(t.from(), k -> new LinkedHashSet<>()).add(target);
+                    adj.computeIfAbsent(t.from(), k -> new LinkedHashSet<>())
+                        .add(resolveTargetForValidation(target));
                 }
             }
         }
@@ -298,10 +309,32 @@ public final class StateMachine {
         Set<String> inStack = new HashSet<>();
         for (String node : adj.keySet()) {
             if (hasCycle(node, adj, visited, inStack)) {
-                errors.add("Auto/Branch transitions form a cycle involving: " + node);
+                errors.add("Auto/Branch transitions form a cycle involving: " + node +
+                    " (resolved auto/branch targets: " + String.join(", ", adj.get(node)) + ")");
                 return;
             }
         }
+    }
+
+    /**
+     * Resolve an auto/branch target the way the engine will at runtime —
+     * descending a composite state to its initial child, repeatedly.
+     *
+     * <p>Returns the declared name unchanged when it cannot be resolved (an
+     * unknown state, or a composite with no initial child) so that V1 and V2
+     * report those problems instead of this check failing on them.</p>
+     */
+    private String resolveTargetForValidation(String name) {
+        StateNode node = stateIndex.get(name);
+        if (node == null) return name;
+        var seen = new HashSet<String>();
+        while (node.isComposite()) {
+            if (!seen.add(node.name())) return name;
+            Optional<StateNode> initial = node.initialChild();
+            if (initial.isEmpty()) return name;
+            node = initial.get();
+        }
+        return node.name();
     }
 
     private boolean hasCycle(String node, Map<String, Set<String>> adj,

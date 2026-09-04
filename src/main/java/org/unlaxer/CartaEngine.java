@@ -16,7 +16,11 @@ import java.util.*;
  * </ul>
  *
  * Auto-chain depth is capped at {@value #MAX_AUTO_CHAIN_DEPTH} to
- * prevent infinite loops (build-time DAG check catches most cases).
+ * prevent infinite loops (the build-time DAG check catches most cases).
+ * Hitting that cap while a transition is still eligible is reported as
+ * {@code CartaException("AUTO_CHAIN_LIMIT", ...)} — the chain never stops
+ * silently mid-way, because an intermediate state left behind is
+ * indistinguishable from a legitimate external wait.
  *
  * <h2>Thread safety</h2>
  * This class is mutable and not thread-safe. Each engine instance is intended
@@ -180,25 +184,55 @@ public final class CartaEngine {
 
     // ─── Auto-chain ────────────────────────────────────────
 
+    /**
+     * Fire consecutive auto and branch transitions until the flow reaches a
+     * terminal state or a state with no eligible auto/branch transition.
+     *
+     * <p>The chain is bounded by {@link #MAX_AUTO_CHAIN_DEPTH}. Reaching that
+     * bound is not a normal stop: it means the chain was cut short while a
+     * transition was still eligible, leaving the flow on an intermediate state
+     * that is indistinguishable from a legitimate external wait. That case
+     * throws {@code CartaException("AUTO_CHAIN_LIMIT", ...)} rather than
+     * returning silently. Stopping because nothing else applies — the ordinary
+     * case, including a chain of exactly {@code MAX_AUTO_CHAIN_DEPTH} steps —
+     * returns normally and is unaffected.</p>
+     */
     private void autoChain() {
         int depth = 0;
-        while (depth < MAX_AUTO_CHAIN_DEPTH && !isCompleted()) {
-            // Try auto transition first
+        while (!isCompleted()) {
+            // Try auto transition first, then branch.
             Transition auto = findAutoTransition(currentState);
-            if (auto != null) {
-                executeAutoTransition(auto);
-                depth++;
-                continue;
+            Transition branch = auto == null ? findBranchTransition(currentState) : null;
+            if (auto == null && branch == null) return;
+
+            if (depth == MAX_AUTO_CHAIN_DEPTH) {
+                throw new CartaException("AUTO_CHAIN_LIMIT", autoChainLimitMessage());
             }
-            // Try branch transition
-            Transition branch = findBranchTransition(currentState);
-            if (branch != null) {
-                executeBranchTransition(branch);
-                depth++;
-                continue;
-            }
-            break;
+
+            if (auto != null) executeAutoTransition(auto);
+            else executeBranchTransition(branch);
+            depth++;
         }
+    }
+
+    /**
+     * Diagnostic for a truncated auto-chain. The traversed states are read back
+     * from {@link #log} so that the happy path allocates nothing extra.
+     */
+    private String autoChainLimitMessage() {
+        var recent = log.subList(Math.max(0, log.size() - MAX_AUTO_CHAIN_DEPTH), log.size());
+        var trail = new StringBuilder();
+        for (TransitionRecord r : recent) {
+            if (trail.length() > 0) trail.append(", ");
+            trail.append(r);
+        }
+        return "Auto-chain exceeded the depth limit of " + MAX_AUTO_CHAIN_DEPTH
+            + " at state " + currentState.name()
+            + " — an auto/branch transition is still eligible there, so the chain was cut short."
+            + " Last " + recent.size() + " transition(s): " + trail
+            + ". Check the auto/branch definitions of " + definition.name()
+            + " for a cycle through a composite state's initial child, or split the"
+            + " chain with an external transition.";
     }
 
     private void executeAutoTransition(Transition t) {
