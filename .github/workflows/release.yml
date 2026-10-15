@@ -11,7 +11,7 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, carta-ci]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
